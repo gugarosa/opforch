@@ -1,5 +1,7 @@
-"""Node structure that composes the subgraph of Optimum-Path Forest.
+"""Node structure that composes the subgraph of the Optimum-Path Forest.
 """
+
+from typing import Optional, Union
 
 import torch
 
@@ -13,13 +15,16 @@ class Node:
 
     """
 
-    def __init__(self, idx=0, label=0, features=None):
+    def __init__(self,
+                 idx: Optional[int] = 0,
+                 label: Optional[int] = 0,
+                 features: Optional[Union[list, torch.Tensor]] = None) -> None:
         """Initialization method.
 
         Args:
-            idx (int): Identifier.
-            label (int): Label.
-            features (torch.Tensor): Tensor holding the features.
+            idx: Numeric identifier.
+            label: True label.
+            features: Features (holds any type of information).
 
         """
 
@@ -31,4 +36,3 @@ class Node:
 
         # Tensor of features
         self.features = torch.Tensor(features)
-
