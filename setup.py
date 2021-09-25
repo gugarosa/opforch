@@ -12,7 +12,7 @@ setup(name='opforch',
       author_email='gustavo.rosa@unesp.br',
       url='https://github.com/gugarosa/opforch',
       license='Apache 2.0',
-      install_requires=['torch>=1.9.0',
+      install_requires=['torch>=1.9.1',
                        ],
       extras_require={
           'tests': ['coverage',
