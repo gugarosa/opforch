@@ -1,0 +1,33 @@
+import opforch.math.general as g
+import opforch.stream.parser as p
+import opforch.stream.splitter as s
+from opforch.models import SemiSupervisedOPF
+from opforch.stream import loader
+
+# Loading a .txt file to a tensor
+txt = loader.load_txt("data/boat.txt")
+
+# Parsing the loaded tensor
+X, Y = p.parse_loader(txt)
+
+# Splitting data into training and testing sets
+X_train, X_test, Y_train, Y_test = s.split(X, Y, percentage=0.8, random_state=1)
+
+# Splitting training into labeled and unlabeled sets
+X_train, X_unlabeled, Y_train, Y_unlabeled = s.split(
+    X_train, Y_train, percentage=0.25, random_state=1
+)
+
+# Creates a SemiSupervisedOPF instance (use device='cuda' for GPU)
+opf = SemiSupervisedOPF(distance="log_squared_euclidean", device="cpu")
+
+# Fits labeled training data along with unlabeled data
+opf.fit(X_train, Y_train, X_unlabeled)
+
+# Predicts new data
+preds = opf.predict(X_test)
+
+# Calculating accuracy
+acc = g.opf_accuracy(Y_test, preds)
+
+print(f"Accuracy: {acc}")
