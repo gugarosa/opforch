@@ -1,2 +1,1 @@
-"""Utilities package to avoid re-implementations.
-"""
+"""Utilities package for cross-cutting concerns."""

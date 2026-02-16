@@ -29,7 +29,7 @@ def get_timed_file_handler() -> TimedRotatingFileHandler:
     """Gets a timed file handler to handle logging into files.
 
     Returns:
-        (TiemdRotatingFileHandler): Output information into timed files.
+        (TimedRotatingFileHandler): Output information into timed files.
 
     """
 
