@@ -1,36 +1,42 @@
 from setuptools import find_packages, setup
 
-with open('README.md', 'r') as f:
+with open("README.md", "r") as f:
     long_description = f.read()
 
-setup(name='opforch',
-      version='1.0.0',
-      description='PyTorch-Inspired Optimum-Path Forest Classifier',
-      long_description=long_description,
-      long_description_content_type='text/markdown',
-      author='Gustavo de Rosa',
-      author_email='gustavo.rosa@unesp.br',
-      url='https://github.com/gugarosa/opforch',
-      license='Apache 2.0',
-      install_requires=['torch>=1.9.1',
-                       ],
-      extras_require={
-          'tests': ['coverage',
-                    'pytest',
-                    'pytest-pep8',
-                   ],
-      },
-      classifiers=[
-          'Development Status :: 5 - Production/Stable',
-          'Intended Audience :: Developers',
-          'Intended Audience :: Education',
-          'Intended Audience :: Science/Research',
-          'License :: OSI Approved :: Apache Software License',
-          'Programming Language :: Python :: 3.6',
-          'Programming Language :: Python :: 3.7',
-          'Programming Language :: Python :: 3.8',
-          'Programming Language :: Python :: 3.9',
-          'Topic :: Software Development :: Libraries',
-          'Topic :: Software Development :: Libraries :: Python Modules'
-      ],
-      packages=find_packages())
+setup(
+    name="opforch",
+    version="2.0.0",
+    description="PyTorch-Inspired Optimum-Path Forest Classifier",
+    long_description=long_description,
+    long_description_content_type="text/markdown",
+    author="Gustavo de Rosa",
+    author_email="gustavo.rosa@unesp.br",
+    url="https://github.com/gugarosa/opforch",
+    license="Apache 2.0",
+    install_requires=[
+        "numpy>=1.19.5",
+        "torch>=2.0.0",
+    ],
+    extras_require={
+        "tests": [
+            "coverage",
+            "pytest",
+            "pytest-pep8",
+        ],
+    },
+    classifiers=[
+        "Development Status :: 5 - Production/Stable",
+        "Intended Audience :: Developers",
+        "Intended Audience :: Education",
+        "Intended Audience :: Science/Research",
+        "License :: OSI Approved :: Apache Software License",
+        "Programming Language :: Python :: 3.8",
+        "Programming Language :: Python :: 3.9",
+        "Programming Language :: Python :: 3.10",
+        "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3.12",
+        "Topic :: Software Development :: Libraries",
+        "Topic :: Software Development :: Libraries :: Python Modules",
+    ],
+    packages=find_packages(),
+)
