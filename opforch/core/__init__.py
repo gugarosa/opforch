@@ -1,5 +1,5 @@
-"""Core structures for handling OPForch implementations.
-"""
+"""Core structures for OPForch implementations."""
 
 from opforch.core.heap import Heap
-from opforch.core.node import Node
+from opforch.core.subgraph import Subgraph
+from opforch.core.opf import OPF
