@@ -1,4 +1,4 @@
-# OPForch: A PyTorch-Inspired Optimum-Path Forest Classifier
+# OPForch: A PyTorch-Powered Optimum-Path Forest Classifier
 
 [![Latest release](https://img.shields.io/github/release/gugarosa/opforch.svg)](https://github.com/gugarosa/opforch/releases)
 [![Open issues](https://img.shields.io/github/issues/gugarosa/opforch.svg)](https://github.com/gugarosa/opforch/issues)
@@ -8,27 +8,159 @@
 
 *Note that this implementation relies purely on the standard [LibOPF](https://github.com/jppbsi/LibOPF). Therefore, if one uses our package, please also cite the original LibOPF [authors](https://github.com/jppbsi/LibOPF/wiki/Additional-information).*
 
-Tired of traditional classifiers? In search for a novel graph-based classifier? Wants to classify data using CUDA? If yes, OPForch is for you! This package is an innovative way of dealing with an Optimum-Path Forest classifier. Builded from the ground using a PyTorch-only approach, we are here to reduce memory footprint and foster every fast and malleable computation.
+OPForch is a **PyTorch-based** implementation of the Optimum-Path Forest (OPF) classifier, migrated from the original [OPFython](https://github.com/gugarosa/opfython) package. By replacing per-node Python objects with dense tensors and scalar Numba loops with batched tensor operations, OPForch delivers **massive speedups** while maintaining **zero prediction mismatches** against the reference implementation.
 
-Use OPForch if you need a library or wish to:
+### Key Highlights
 
-* Create your datasets;
-* Design or use pre-loaded state-of-art classifiers;
-* Mix-and-match different strategies to solve your problem;
-* Because it is cool to classify things.
+| Metric | Result |
+|--------|--------|
+| **Accuracy Parity** | 0 prediction mismatches across all 4 classifiers |
+| **Predict Speedup** | Up to **484×** faster at N=10,000 |
+| **Fit Speedup** | Up to **19×** faster at N=10,000 |
+| **Distance Matrix** | Up to **413×** faster (batched tensor vs N² scalar loop) |
+| **GPU Acceleration** | **12.7×** additional speedup on RTX 4070 for distance computation |
+| **Device Support** | CPU, CUDA, and Multi-GPU via `DeviceManager` |
 
-Read the docs at [opforch.readthedocs.io](https://opforch.readthedocs.io).
+### Use OPForch if you need:
 
-OPForch is compatible with: **Python 3.6+**.
+* Graph-based classification without hyperparameter tuning
+* Deterministic training with competitive accuracy
+* GPU-accelerated distance computation and prediction
+* A drop-in replacement for OPFython with orders-of-magnitude speedups
+
+OPForch is compatible with: **Python 3.8+** and **PyTorch 2.0+**.
 
 ---
 
-## Package guidelines
+## Package Structure
 
-1. The very first information you need is in the very **next** section.
-2. **Installing** is also easy if you wish to read the code and bump yourself into, follow along.
-3. Note that there might be some **additional** steps in order to use our solutions.
-4. If there is a problem, please do not **hesitate**. Call us.
+```
+opforch/
+├── core/
+│   ├── heap.py          # Tensor-backed binary heap
+│   ├── subgraph.py      # Dense tensor columns (13 state tensors)
+│   └── opf.py           # Abstract base (torch.save/load, device)
+├── math/
+│   ├── distance.py      # 47 batched (N,D)×(M,D)→(N,M) distance metrics
+│   ├── general.py       # Accuracy, confusion matrix, normalize, purity
+│   └── random.py        # Tensor-based random generators
+├── models/
+│   ├── supervised.py        # MST + competition + batched predict
+│   ├── knn_supervised.py    # KNN density clustering + k-selection
+│   ├── semi_supervised.py   # Labeled + unlabeled propagation
+│   └── unsupervised.py      # Density clustering + normalized cut
+├── stream/
+│   ├── loader.py        # CSV/TXT/JSON → torch.Tensor
+│   ├── parser.py        # Extract features + labels
+│   └── splitter.py      # Train/test split
+├── subgraphs/
+│   └── knn.py           # KNNSubgraph (torch.topk, vectorized PDF)
+├── utils/
+│   ├── constants.py     # EPSILON, FLOAT_MAX, status codes
+│   ├── converter.py     # Binary OPF format converters
+│   ├── device.py        # DeviceManager (CPU/GPU/multi-GPU)
+│   ├── exception.py     # Custom exception hierarchy
+│   └── logging.py       # Timed rotating file logger
+├── report/              # Migration report, benchmarks, and plots
+├── examples/            # Usage scripts for all 4 classifiers
+```
+
+---
+
+## Installation
+
+Install from source:
+
+```bash
+git clone https://github.com/gugarosa/opforch.git
+cd opforch
+pip install -e .
+```
+
+For GPU support, install PyTorch with CUDA:
+
+```bash
+pip install torch --index-url https://download.pytorch.org/whl/cu124
+```
+
+---
+
+## Quick Start
+
+### Supervised Classification
+
+```python
+import torch
+from opforch.models import SupervisedOPF
+from opforch.stream import loader, parser, splitter
+
+# Load data
+data = loader.load_txt("data/boat.txt")
+X, Y = parser.parse_loader(data)
+X_train, X_test, Y_train, Y_test = splitter.split(X, Y, percentage=0.5)
+
+# Train and predict (CPU)
+opf = SupervisedOPF(distance="log_squared_euclidean")
+opf.fit(X_train, Y_train)
+predictions = opf.predict(X_test)
+
+# GPU — just change the device
+opf_gpu = SupervisedOPF(distance="euclidean", device="cuda:0")
+opf_gpu.fit(X_train.cuda(), Y_train.cuda())
+predictions = opf_gpu.predict(X_test.cuda())
+```
+
+### Available Classifiers
+
+| Classifier | Description |
+|-----------|-------------|
+| `SupervisedOPF` | MST-based prototype detection + cost competition |
+| `KNNSupervisedOPF` | k-NN density clustering with validation-driven k |
+| `SemiSupervisedOPF` | Extends supervised with unlabeled data propagation |
+| `UnsupervisedOPF` | Density-based clustering with normalized cut |
+
+All classifiers support `fit()`, `predict()`, `save()`, and `load()`, and accept a `device` parameter for CPU/GPU execution.
+
+---
+
+## Benchmarks
+
+Run the benchmark suite to compare performance on your hardware:
+
+```bash
+# Baseline benchmarks (47 metrics, 4 models, scaling)
+python report/benchmark.py
+
+# Extended benchmarks (up to N=10K, GPU, dimensionality)
+python report/benchmark_extended.py
+
+# Generate plots
+python report/plot_benchmarks.py
+python report/plot_extended.py
+```
+
+For the full migration report with detailed analysis, see [`report/REPORT.md`](report/REPORT.md).
+
+---
+
+## Architecture
+
+The key architectural change from OPFython is the elimination of per-node Python objects in favor of dense tensor columns:
+
+```
+OPFython:  subgraph.nodes[i].cost = 5.0        # Python object attribute
+OPForch:   subgraph.costs[i] = 5.0             # Tensor element (GPU-ready)
+```
+
+Prediction is fully batched — a single tensor operation replaces the O(N×M) Python loop:
+
+```python
+dist_matrix = distance_fn(train_features, test_features)      # (N, M)
+path_costs = torch.maximum(train_costs[:, None], dist_matrix)  # (N, M)
+predictions = train_labels[path_costs.argmin(dim=0)]           # (M,)
+```
+
+For the complete architecture documentation, see [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 ---
 
@@ -36,78 +168,22 @@ OPForch is compatible with: **Python 3.6+**.
 
 If you use OPForch to fulfill any of your needs, please cite us:
 
+```
+J. P. Papa, A. X. Falcão and C. T. N. Suzuki.
+Supervised Pattern Classification based on Optimum-Path Forest.
+International Journal of Imaging Systems and Technology (2009).
+```
+
 ---
 
 ## Datasets
 
-In search for datasets? We have some already pre-loaded into OPF file format. Just check them out at our [website](http://recogna.tech)!
-
----
-
-## Getting started: 60 seconds with OPForch
-
-First of all. We have examples. Yes, they are commented. Just browse to `examples/`, chose your subpackage, and follow the example. We have high-level examples for most tasks we could think.
-
-Alternatively, if you wish to learn even more, please take a minute:
-
-OPForch is based on the following structure, and you should pay attention to its tree:
-
-```yaml
-- opforch
-    - core
-        - heap
-        - node
-    - utils
-        - constants
-        - logging
-```
-
-### Core
-
-Core is the core. Essentially, it is the parent of everything. You should find parent classes defining the basis of our structure. They should provide variables and methods that will help to construct other modules.
-
-### Utils
-
-This is a utility package. Common things shared across the application should be implemented here. It is better to implement once and use it as you wish than re-implementing the same thing over and over again.
-
----
-
-## Installation
-
-We believe that everything has to be easy. Not tricky or daunting, OPForch will be the one-to-go package that you will need, from the very first installation to the daily-tasks implementing needs. If you may just run the following under your most preferred Python environment (raw, conda, virtualenv, whatever):
-
-```bash
-pip install opforch
-```
-
-Alternatively, if you prefer to install the bleeding-edge version, please clone this repository and use:
-
-```bash
-pip install -e .
-```
-
----
-
-## Environment configuration
-
-Note that sometimes, there is a need for additional implementation. If needed, from here you will be the one to know all of its details.
-
-### Ubuntu
-
-No specific additional commands needed.
-
-### Windows
-
-No specific additional commands needed.
-
-### MacOS
-
-No specific additional commands needed.
+Looking for datasets? We have some pre-loaded into OPF file format in the `data/` directory. More are available at [recogna.tech](http://recogna.tech).
 
 ---
 
 ## Support
 
-We know that we do our best, but it is inevitable to acknowledge that we make mistakes. If you ever need to report a bug, report a problem, talk to us, please do so! We will be available at our bests at this repository.
+If you ever need to report a bug, talk to us, or suggest improvements, please open an issue. We will do our best to help.
 
 ---

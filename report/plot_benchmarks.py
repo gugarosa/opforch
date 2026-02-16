@@ -22,8 +22,8 @@ import matplotlib.ticker as ticker
 import numpy as np
 
 
-RESULTS_DIR = Path(__file__).parent / "results"
-RESULTS_FILE = RESULTS_DIR / "benchmark_results.json"
+RESULTS_DIR = Path(__file__).parent / "images"
+RESULTS_FILE = Path(__file__).parent / "results" / "benchmark_results.json"
 
 # Colour palette
 C_OPFYTHON = "#5B8DEE"   # blue

@@ -20,8 +20,8 @@ import matplotlib.ticker as ticker
 import numpy as np
 from matplotlib.gridspec import GridSpec
 
-RESULTS_DIR = Path(__file__).parent / "results"
-RESULTS_FILE = RESULTS_DIR / "extended_benchmark_results.json"
+RESULTS_DIR = Path(__file__).parent / "images"
+RESULTS_FILE = Path(__file__).parent / "results" / "extended_benchmark_results.json"
 
 # Colour palette
 C_OPFYTHON = "#5B8DEE"
