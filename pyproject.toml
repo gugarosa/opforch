@@ -1,2 +1,72 @@
+[build-system]
+requires = ["setuptools>=68,<77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "opforch"
+dynamic = ["version"]
+description = "PyTorch-inspired Optimum-Path Forest classifiers"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "Apache 2.0" }
+authors = [
+    { name = "Gustavo de Rosa", email = "gustavo.rosa@unesp.br" },
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Education",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "numpy>=1.19.5",
+    "torch>=2.0,<2.5; python_version < '3.9'",
+    "torch>=2.0; python_version >= '3.9'",
+]
+
+[project.optional-dependencies]
+dev = ["pre-commit>=3.4,<4"]
+docs = ["sphinx>=7,<8"]
+tests = [
+    "coverage>=7",
+    "pytest>=7.4,<9",
+]
+
+[project.urls]
+Homepage = "https://github.com/gugarosa/opforch"
+Documentation = "https://opforch.readthedocs.io"
+Issues = "https://github.com/gugarosa/opforch/issues"
+
+[dependency-groups]
+dev = [
+    "coverage>=7",
+    "pre-commit>=3.4,<4",
+    "pytest>=7.4,<9",
+]
+
+[tool.setuptools.dynamic]
+version = { attr = "opforch.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["opforch*"]
+
 [tool.black]
 line-length = 88
+target-version = ["py38"]
+
+[tool.isort]
+profile = "black"
+
+[tool.pytest.ini_options]
+addopts = ["-v", "--durations=10"]
+norecursedirs = ["build", ".*", "dist", "venv", "node_modules", "*.egg"]
+testpaths = ["tests"]

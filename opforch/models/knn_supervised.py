@@ -137,15 +137,15 @@ class KNNSupervisedOPF(OPF):
 
         logger.info("Learning best `k` value ...")
 
-        self.subgraph = KNNSubgraph(
-            X_train, Y_train, I_train, device=str(self.device)
-        )
+        self.subgraph = KNNSubgraph(X_train, Y_train, I_train, device=str(self.device))
 
         # Compute distance matrix once for all k values
         if self.pre_computed_distance:
             dist_matrix = self.pre_distances
         else:
-            dist_matrix = self.distance_fn(self.subgraph.features, self.subgraph.features)
+            dist_matrix = self.distance_fn(
+                self.subgraph.features, self.subgraph.features
+            )
 
         max_acc = 0.0
         best_k = 1
@@ -202,7 +202,9 @@ class KNNSupervisedOPF(OPF):
         if self.pre_computed_distance:
             dist_matrix = self.pre_distances
         else:
-            dist_matrix = self.distance_fn(self.subgraph.features, self.subgraph.features)
+            dist_matrix = self.distance_fn(
+                self.subgraph.features, self.subgraph.features
+            )
 
         self.subgraph.create_arcs_from_matrix(dist_matrix, self.subgraph.best_k)
         self.subgraph.calculate_pdf_from_matrix(dist_matrix, self.subgraph.best_k)
@@ -248,8 +250,6 @@ class KNNSupervisedOPF(OPF):
             dist_matrix = self.distance_fn(self.subgraph.features, X_test)
 
         best_k = self.subgraph.best_k
-        M = X_test.shape[0]
-
         # Find k-nearest training nodes for each test sample
         knn_dists, knn_idx = dist_matrix.topk(best_k, dim=0, largest=False)
         # knn_dists: (k, M), knn_idx: (k, M)

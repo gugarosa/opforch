@@ -32,9 +32,9 @@ class Heap:
         """
 
         if size < 1:
-            raise builtins.ValueError("`size` should be > 0")
+            raise ValueError("`size` should be > 0")
         if policy not in ("min", "max"):
-            raise builtins.ValueError("`policy` should be 'min' or 'max'")
+            raise ValueError("`policy` should be 'min' or 'max'")
 
         self.size = size
         self.policy = policy
@@ -43,15 +43,9 @@ class Heap:
         self.cost = torch.full(
             (size,), c.FLOAT_MAX, dtype=torch.float64, device=self.device
         )
-        self.color = torch.full(
-            (size,), c.WHITE, dtype=torch.int8, device=self.device
-        )
-        self.p = torch.full(
-            (size,), -1, dtype=torch.int64, device=self.device
-        )
-        self.pos = torch.full(
-            (size,), -1, dtype=torch.int64, device=self.device
-        )
+        self.color = torch.full((size,), c.WHITE, dtype=torch.int8, device=self.device)
+        self.p = torch.full((size,), -1, dtype=torch.int64, device=self.device)
+        self.pos = torch.full((size,), -1, dtype=torch.int64, device=self.device)
         self.last = -1
 
     def is_full(self) -> bool:
@@ -79,6 +73,11 @@ class Heap:
 
         return 2 * i + 2
 
+    def _higher_priority(self, left: int, right: int) -> bool:
+        if self.policy == "min":
+            return self.cost[left] < self.cost[right]
+        return self.cost[left] > self.cost[right]
+
     def go_up(self, i: int) -> None:
         """Sifts a node up to maintain heap property.
 
@@ -89,20 +88,12 @@ class Heap:
 
         j = self.dad(i)
 
-        if self.policy == "min":
-            while i > 0 and self.cost[self.p[j]] > self.cost[self.p[i]]:
-                self.p[j], self.p[i] = self.p[i].clone(), self.p[j].clone()
-                self.pos[self.p[i]] = i
-                self.pos[self.p[j]] = j
-                i = j
-                j = self.dad(i)
-        else:
-            while i > 0 and self.cost[self.p[j]] < self.cost[self.p[i]]:
-                self.p[j], self.p[i] = self.p[i].clone(), self.p[j].clone()
-                self.pos[self.p[i]] = i
-                self.pos[self.p[j]] = j
-                i = j
-                j = self.dad(i)
+        while i > 0 and self._higher_priority(self.p[i], self.p[j]):
+            self.p[j], self.p[i] = self.p[i].clone(), self.p[j].clone()
+            self.pos[self.p[i]] = i
+            self.pos[self.p[j]] = j
+            i = j
+            j = self.dad(i)
 
     def go_down(self, i: int) -> None:
         """Sifts a node down to maintain heap property.
@@ -116,16 +107,10 @@ class Heap:
         right = self.right_son(i)
         j = i
 
-        if self.policy == "min":
-            if left <= self.last and self.cost[self.p[left]] < self.cost[self.p[i]]:
-                j = left
-            if right <= self.last and self.cost[self.p[right]] < self.cost[self.p[j]]:
-                j = right
-        else:
-            if left <= self.last and self.cost[self.p[left]] > self.cost[self.p[i]]:
-                j = left
-            if right <= self.last and self.cost[self.p[right]] > self.cost[self.p[j]]:
-                j = right
+        if left <= self.last and self._higher_priority(self.p[left], self.p[j]):
+            j = left
+        if right <= self.last and self._higher_priority(self.p[right], self.p[j]):
+            j = right
 
         if j != i:
             self.p[j], self.p[i] = self.p[i].clone(), self.p[j].clone()
@@ -192,7 +177,7 @@ class Heap:
         self.cost[p] = cost
 
         if self.color[p] == c.BLACK:
-            pass
+            return
 
         if self.color[p] == c.WHITE:
             self.insert(p)

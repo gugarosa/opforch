@@ -101,8 +101,6 @@ class KNNSubgraph(Subgraph):
 
         """
 
-        N = self.n_nodes
-
         # Exclude self-loops by setting diagonal to infinity
         dist_no_self = dist_matrix.clone()
         dist_no_self.fill_diagonal_(float("inf"))
@@ -183,7 +181,9 @@ class KNNSubgraph(Subgraph):
 
         # Compute PDF: Gaussian kernel over k-NN distances
         # opfython initializes n_pdf=1 then increments per neighbour, dividing by (k+1)
-        pdf = torch.exp(-knn_dists / self.constant).sum(dim=1) / (n_neighbours + 1)  # (N,)
+        pdf = torch.exp(-knn_dists / self.constant).sum(dim=1) / (
+            n_neighbours + 1
+        )  # (N,)
 
         self.min_density = pdf.min().item()
         self.max_density = pdf.max().item()
@@ -264,8 +264,10 @@ class KNNSubgraph(Subgraph):
         if max_extra > 0:
             k_orig = self.adjacency.shape[1]
             new_adj = torch.full(
-                (N, max_extra + k_orig), -1,
-                dtype=torch.int64, device=self.adjacency.device,
+                (N, max_extra + k_orig),
+                -1,
+                dtype=torch.int64,
+                device=self.adjacency.device,
             )
             for i in range(N):
                 extras = to_prepend[i]
@@ -274,7 +276,7 @@ class KNNSubgraph(Subgraph):
                     new_adj[i, :n_extra] = torch.tensor(
                         extras, dtype=torch.int64, device=self.adjacency.device
                     )
-                new_adj[i, max_extra:max_extra + k_orig] = self.adjacency[i]
+                new_adj[i, max_extra : max_extra + k_orig] = self.adjacency[i]
                 self.n_plateaus[i] = len(extras)
 
             self.adjacency = new_adj

@@ -4,7 +4,6 @@ Every function takes two tensors X: (N, D) and Y: (M, D) and returns
 a distance matrix of shape (N, M). All operations are GPU-compatible.
 """
 
-import math
 from typing import Callable, Dict
 
 import torch
@@ -432,9 +431,7 @@ def non_intersection_distance(X: torch.Tensor, Y: torch.Tensor) -> torch.Tensor:
     return 0.5 * (Xe - Ye).abs().sum(dim=-1)
 
 
-def mean_censored_euclidean_distance(
-    X: torch.Tensor, Y: torch.Tensor
-) -> torch.Tensor:
+def mean_censored_euclidean_distance(X: torch.Tensor, Y: torch.Tensor) -> torch.Tensor:
     """Mean Censored Euclidean Distance."""
 
     Xe, Ye = _expand_safe(X, Y)

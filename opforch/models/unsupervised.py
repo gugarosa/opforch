@@ -98,7 +98,9 @@ class UnsupervisedOPF(OPF):
             # Iterate over adjacency
             if self.subgraph.adjacency is not None:
                 adj = self.subgraph.adjacency[p]
-                n_adj = min(n_neighbours + self.subgraph.n_plateaus[p].item(), adj.numel())
+                n_adj = min(
+                    n_neighbours + self.subgraph.n_plateaus[p].item(), adj.numel()
+                )
                 for ki in range(n_adj):
                     q = adj[ki].item()
                     if q < 0:
@@ -112,7 +114,9 @@ class UnsupervisedOPF(OPF):
                         if current_cost > h.cost[q].item():
                             self.subgraph.preds[q] = p
                             self.subgraph.roots[q] = self.subgraph.roots[p]
-                            self.subgraph.cluster_labels[q] = self.subgraph.cluster_labels[p]
+                            self.subgraph.cluster_labels[q] = (
+                                self.subgraph.cluster_labels[p]
+                            )
                             h.update(q, current_cost)
 
         self.subgraph.n_clusters = cluster_id
@@ -236,15 +240,15 @@ class UnsupervisedOPF(OPF):
 
         start = time.time()
 
-        self.subgraph = KNNSubgraph(
-            X_train, Y_train, I_train, device=str(self.device)
-        )
+        self.subgraph = KNNSubgraph(X_train, Y_train, I_train, device=str(self.device))
 
         # Compute distance matrix once
         if self.pre_computed_distance:
             dist_matrix = self.pre_distances
         else:
-            dist_matrix = self.distance_fn(self.subgraph.features, self.subgraph.features)
+            dist_matrix = self.distance_fn(
+                self.subgraph.features, self.subgraph.features
+            )
 
         self._best_minimum_cut(self.min_k, self.max_k, dist_matrix)
         self._clustering(self.subgraph.best_k)
@@ -292,8 +296,6 @@ class UnsupervisedOPF(OPF):
             dist_matrix = self.distance_fn(self.subgraph.features, X_val)
 
         best_k = self.subgraph.best_k
-        M = X_val.shape[0]
-
         # Find k-nearest training nodes for each test sample
         knn_dists, knn_idx = dist_matrix.topk(best_k, dim=0, largest=False)
 

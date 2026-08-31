@@ -40,9 +40,7 @@ class SemiSupervisedOPF(SupervisedOPF):
 
         logger.info("Overriding class: SupervisedOPF -> SemiSupervisedOPF.")
 
-        super(SemiSupervisedOPF, self).__init__(
-            distance, pre_computed_distance, device
-        )
+        super(SemiSupervisedOPF, self).__init__(distance, pre_computed_distance, device)
 
         logger.info("Class overrided.")
 
@@ -93,45 +91,84 @@ class SemiSupervisedOPF(SupervisedOPF):
         n_total = n_labeled + n_unlabeled
 
         # Expand all tensors
-        self.subgraph.features = torch.cat(
-            [self.subgraph.features, X_unlabeled], dim=0
-        )
+        self.subgraph.features = torch.cat([self.subgraph.features, X_unlabeled], dim=0)
         self.subgraph.labels = torch.cat(
-            [self.subgraph.labels, torch.zeros(n_unlabeled, dtype=torch.int64, device=self.device)]
+            [
+                self.subgraph.labels,
+                torch.zeros(n_unlabeled, dtype=torch.int64, device=self.device),
+            ]
         )
         self.subgraph.indices = torch.cat(
-            [self.subgraph.indices,
-             torch.arange(n_labeled, n_total, dtype=torch.int64, device=self.device)]
+            [
+                self.subgraph.indices,
+                torch.arange(n_labeled, n_total, dtype=torch.int64, device=self.device),
+            ]
         )
         self.subgraph.pred_labels = torch.cat(
-            [self.subgraph.pred_labels, torch.zeros(n_unlabeled, dtype=torch.int64, device=self.device)]
+            [
+                self.subgraph.pred_labels,
+                torch.zeros(n_unlabeled, dtype=torch.int64, device=self.device),
+            ]
         )
         self.subgraph.cluster_labels = torch.cat(
-            [self.subgraph.cluster_labels, torch.zeros(n_unlabeled, dtype=torch.int64, device=self.device)]
+            [
+                self.subgraph.cluster_labels,
+                torch.zeros(n_unlabeled, dtype=torch.int64, device=self.device),
+            ]
         )
         self.subgraph.costs = torch.cat(
-            [self.subgraph.costs, torch.zeros(n_unlabeled, dtype=torch.float64, device=self.device)]
+            [
+                self.subgraph.costs,
+                torch.zeros(n_unlabeled, dtype=torch.float64, device=self.device),
+            ]
         )
         self.subgraph.densities = torch.cat(
-            [self.subgraph.densities, torch.zeros(n_unlabeled, dtype=torch.float64, device=self.device)]
+            [
+                self.subgraph.densities,
+                torch.zeros(n_unlabeled, dtype=torch.float64, device=self.device),
+            ]
         )
         self.subgraph.radii = torch.cat(
-            [self.subgraph.radii, torch.zeros(n_unlabeled, dtype=torch.float64, device=self.device)]
+            [
+                self.subgraph.radii,
+                torch.zeros(n_unlabeled, dtype=torch.float64, device=self.device),
+            ]
         )
         self.subgraph.n_plateaus = torch.cat(
-            [self.subgraph.n_plateaus, torch.zeros(n_unlabeled, dtype=torch.int64, device=self.device)]
+            [
+                self.subgraph.n_plateaus,
+                torch.zeros(n_unlabeled, dtype=torch.int64, device=self.device),
+            ]
         )
         self.subgraph.preds = torch.cat(
-            [self.subgraph.preds, torch.full((n_unlabeled,), c.NIL, dtype=torch.int64, device=self.device)]
+            [
+                self.subgraph.preds,
+                torch.full(
+                    (n_unlabeled,), c.NIL, dtype=torch.int64, device=self.device
+                ),
+            ]
         )
         self.subgraph.roots = torch.cat(
-            [self.subgraph.roots, torch.arange(n_labeled, n_total, dtype=torch.int64, device=self.device)]
+            [
+                self.subgraph.roots,
+                torch.arange(n_labeled, n_total, dtype=torch.int64, device=self.device),
+            ]
         )
         self.subgraph.status = torch.cat(
-            [self.subgraph.status, torch.full((n_unlabeled,), c.STANDARD, dtype=torch.int8, device=self.device)]
+            [
+                self.subgraph.status,
+                torch.full(
+                    (n_unlabeled,), c.STANDARD, dtype=torch.int8, device=self.device
+                ),
+            ]
         )
         self.subgraph.relevant = torch.cat(
-            [self.subgraph.relevant, torch.full((n_unlabeled,), c.IRRELEVANT, dtype=torch.int8, device=self.device)]
+            [
+                self.subgraph.relevant,
+                torch.full(
+                    (n_unlabeled,), c.IRRELEVANT, dtype=torch.int8, device=self.device
+                ),
+            ]
         )
 
         # Compute distance matrix for the combined data

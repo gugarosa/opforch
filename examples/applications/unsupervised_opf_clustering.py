@@ -14,9 +14,7 @@ X, Y = p.parse_loader(txt)
 X_train, X_test, Y_train, Y_test = s.split(X, Y, percentage=0.5, random_state=1)
 
 # Creates an UnsupervisedOPF instance (use device='cuda' for GPU)
-opf = UnsupervisedOPF(
-    min_k=1, max_k=10, distance="log_squared_euclidean", device="cpu"
-)
+opf = UnsupervisedOPF(min_k=1, max_k=10, distance="log_squared_euclidean", device="cpu")
 
 # Fits training data for clustering
 opf.fit(X_train, Y_train)

@@ -1,13 +1,11 @@
 """Optimum-Path Forest abstract base classifier."""
 
-import pickle
 from typing import List, Optional
 
 import torch
 
 import opforch.math.distance as d
 import opforch.utils.exception as e
-from opforch.core.subgraph import Subgraph
 from opforch.utils import logging
 from opforch.utils.device import DeviceManager
 
@@ -102,9 +100,7 @@ class OPF:
             )
 
         if distances is None:
-            raise e.ValueError(
-                "Pre-computed distances could not be properly loaded"
-            )
+            raise e.ValueError("Pre-computed distances could not be properly loaded")
 
         self.pre_distances = distances
 
@@ -119,9 +115,7 @@ class OPF:
 
         """
 
-        distances = self.distance_fn(
-            self.subgraph.features, self.subgraph.features
-        )
+        distances = self.distance_fn(self.subgraph.features, self.subgraph.features)
 
         if normalize:
             d_min = distances.min()
@@ -141,9 +135,7 @@ class OPF:
 
         """
 
-        self.device = (
-            torch.device(device) if isinstance(device, str) else device
-        )
+        self.device = torch.device(device) if isinstance(device, str) else device
 
         if self.subgraph is not None:
             self.subgraph.to(self.device)

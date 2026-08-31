@@ -39,16 +39,16 @@ def test_opf_accuracy_per_label():
     assert acc_per_label.shape == (2,)
 
 
-def test_opf_pre_compute_distances():
+def test_opf_pre_compute_distances(tmp_path):
     txt = loader.load_txt("data/boat.txt")
 
     X, Y = parser.parse_loader(txt)
 
     X_train, _, _, _ = splitter.split(X, Y, 0.5, 1)
 
-    general.pre_compute_distance(
-        X_train, "boat_split_distances.pt", "log_squared_euclidean"
-    )
+    output = tmp_path / "distances.pt"
+    general.pre_compute_distance(X_train, str(output), "log_squared_euclidean")
+    assert output.is_file()
 
 
 def test_purity():

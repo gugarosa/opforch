@@ -1,33 +1,13 @@
 Welcome to OPForch's documentation!
 ========================================
 
-Have you ever wanted to classify data into labels using GPU-accelerated algorithms? If yes, OPForch is for you! This package is an innovative PyTorch-based implementation of the Optimum-Path Forest classifier. From bottom to top, from samples and datasets to the actual classifier, we will foster all research related to this newly trend.
+OPForch provides PyTorch implementations of supervised, semi-supervised,
+unsupervised, and k-nearest-neighbour Optimum-Path Forest classifiers.
 
-Use OPForch if you need a library or wish to:
-
-* Create your own datasets;
-* Design or use pre-loaded state-of-art classifiers;
-* Leverage GPU acceleration for large-scale classification;
-* Mix-and-match different strategies to solve your problem;
-* Because it is cool to classify things.
-
-OPForch is compatible with: **Python 3.8+** and **PyTorch 2.0+**.
+OPForch requires Python 3.8 or newer and PyTorch 2.0 or newer.
 
 .. toctree::
-    :maxdepth: 2
-    :caption: Package Reference
+   :maxdepth: 2
+   :caption: Package Reference
 
-    api/opforch.core
-    api/opforch.math
-    api/opforch.models
-    api/opforch.stream
-    api/opforch.subgraphs
-    api/opforch.utils
-
-
-Indices and tables
-==================
-
-* :ref:`genindex`
-* :ref:`modindex`
-* :ref:`search`
+   api
