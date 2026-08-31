@@ -1,5 +1,3 @@
-import torch
-
 from opforch.models import semi_supervised
 from opforch.stream import loader, parser
 

@@ -19,9 +19,7 @@ X_train, X_val, Y_train, Y_val = s.split(
 )
 
 # Creates a KNNSupervisedOPF instance (use device='cuda' for GPU)
-opf = KNNSupervisedOPF(
-    max_k=10, distance="log_squared_euclidean", device="cpu"
-)
+opf = KNNSupervisedOPF(max_k=10, distance="log_squared_euclidean", device="cpu")
 
 # Fits training data with validation set for k-learning
 opf.fit(X_train, Y_train, X_val, Y_val)

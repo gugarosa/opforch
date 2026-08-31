@@ -15,7 +15,8 @@ def test_get_file_handler():
 
 def test_get_logger():
     logger = logging.get_logger(__name__)
+    handlers = len(logger.handlers)
 
     assert logger.name == "test_logging"
-
     assert logger.hasHandlers() is True
+    assert len(logging.get_logger(__name__).handlers) == handlers

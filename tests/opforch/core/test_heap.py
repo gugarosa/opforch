@@ -1,7 +1,4 @@
-import torch
-
 from opforch.core import heap
-import opforch.utils.constants as c
 
 
 def test_heap_size():

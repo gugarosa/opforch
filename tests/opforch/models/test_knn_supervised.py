@@ -1,7 +1,7 @@
 import torch
 
 from opforch.models import knn_supervised
-from opforch.stream import loader, parser, splitter
+from opforch.stream import loader, parser
 
 csv = loader.load_csv("data/boat.csv")
 X, Y = parser.parse_loader(csv)

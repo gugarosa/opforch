@@ -34,7 +34,9 @@ def confusion_matrix(
     indices = labels * n_class + preds
 
     c_matrix = torch.zeros(n_class * n_class, dtype=torch.float32, device=labels.device)
-    c_matrix.scatter_add_(0, indices.long(), torch.ones_like(indices, dtype=torch.float32))
+    c_matrix.scatter_add_(
+        0, indices.long(), torch.ones_like(indices, dtype=torch.float32)
+    )
 
     return c_matrix.reshape(n_class, n_class)
 
@@ -88,7 +90,7 @@ def opf_accuracy(
             errors[labels[i], 1] += 1
 
     errors[:, 1] /= counts
-    errors[:, 0] /= (counts.sum() - counts)
+    errors[:, 0] /= counts.sum() - counts
     errors = torch.nansum(errors, dim=1)
 
     accuracy = 1 - (errors.sum() / (2 * n_class))

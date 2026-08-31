@@ -10,7 +10,7 @@ import opforch.math.general as g
 import opforch.math.random as r
 import opforch.utils.constants as c
 import opforch.utils.exception as e
-from opforch.core import OPF, Heap, Subgraph
+from opforch.core import OPF, Subgraph
 from opforch.utils import logging
 
 logger = logging.get_logger(__name__)
@@ -151,9 +151,7 @@ class SupervisedOPF(OPF):
 
             # Compute minimax path costs
             arc_weights = dist_matrix[p, candidate_indices].to(dtype=torch.float64)
-            path_costs = torch.maximum(
-                costs[p].expand_as(arc_weights), arc_weights
-            )
+            path_costs = torch.maximum(costs[p].expand_as(arc_weights), arc_weights)
 
             # Find which candidates actually improve
             improved = path_costs < costs[candidate_indices]
@@ -162,7 +160,9 @@ class SupervisedOPF(OPF):
             if update_indices.numel() > 0:
                 costs[update_indices] = path_costs[improved]
                 self.subgraph.preds[update_indices] = p
-                self.subgraph.pred_labels[update_indices] = self.subgraph.pred_labels[p].clone()
+                self.subgraph.pred_labels[update_indices] = self.subgraph.pred_labels[
+                    p
+                ].clone()
 
         self.subgraph.idx_nodes = idx_nodes
 
@@ -191,7 +191,9 @@ class SupervisedOPF(OPF):
         if self.pre_computed_distance:
             dist_matrix = self.pre_distances
         else:
-            dist_matrix = self.distance_fn(self.subgraph.features, self.subgraph.features)
+            dist_matrix = self.distance_fn(
+                self.subgraph.features, self.subgraph.features
+            )
 
         # Step 1: Find prototypes via MST
         self._find_prototypes(dist_matrix)
@@ -245,7 +247,9 @@ class SupervisedOPF(OPF):
 
         # Minimax path costs: max(train_node_cost, arc_weight)
         train_costs = self.subgraph.costs.unsqueeze(1)  # (N, 1)
-        path_costs = torch.maximum(train_costs, dist_matrix.to(dtype=torch.float64))  # (N, M)
+        path_costs = torch.maximum(
+            train_costs, dist_matrix.to(dtype=torch.float64)
+        )  # (N, M)
 
         # Best training node for each test sample (minimum minimax cost)
         _, best_nodes = path_costs.min(dim=0)  # (M,)
@@ -323,12 +327,17 @@ class SupervisedOPF(OPF):
             for err_idx in errors:
                 ctr = n_non_proto
                 while ctr > 0:
-                    j_rand = r.generate_uniform_random_number(0, len(X_train), 1)
-                    j = int(j_rand.item())
+                    j = int(r.generate_uniform_random_number(0, len(X_train), 1).item())
 
                     if self.subgraph.status[j] != c.PROTOTYPE:
-                        X_train[j], X_val[err_idx] = X_val[err_idx].clone(), X_train[j].clone()
-                        Y_train[j], Y_val[err_idx] = Y_val[err_idx].clone(), Y_train[j].clone()
+                        X_train[j], X_val[err_idx] = (
+                            X_val[err_idx].clone(),
+                            X_train[j].clone(),
+                        )
+                        Y_train[j], Y_val[err_idx] = (
+                            Y_val[err_idx].clone(),
+                            Y_train[j].clone(),
+                        )
                         n_non_proto -= 1
                         ctr = 0
                     else:

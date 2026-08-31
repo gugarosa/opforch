@@ -1,5 +1,3 @@
-import os
-
 import pytest
 import torch
 
@@ -62,19 +60,15 @@ def test_opf_read_distances():
     assert clf.pre_distances.shape == (100, 4)
 
 
-def test_opf_save():
+def test_opf_save_and_load(tmp_path):
     clf = opf.OPF(distance="bray_curtis")
+    output = tmp_path / "model.pt"
 
-    clf.save("data/test.pt")
+    clf.save(str(output))
+    assert output.is_file()
 
-    assert os.path.isfile("data/test.pt")
-
-
-def test_opf_load():
     clf = opf.OPF()
-
-    clf.load("data/test.pt")
-
+    clf.load(str(output))
     assert clf.distance == "bray_curtis"
 
 

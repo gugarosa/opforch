@@ -1,5 +1,6 @@
-"""Logging-based methods and helpers.
-"""
+"""Logging helpers."""
+
+from __future__ import annotations
 
 import logging
 import sys
@@ -11,55 +12,28 @@ LOG_FILE = "opforch.log"
 
 
 def get_console_handler() -> StreamHandler:
-    """Gets a console handler to handle logging into console.
+    """Return the configured console handler."""
 
-    Returns:
-        (StreamHandler): Output information into console.
-
-    """
-
-    # Creates a stream handler for logger
-    console_handler = StreamHandler(sys.stdout)
-    console_handler.setFormatter(FORMATTER)
-
-    return console_handler
+    handler = StreamHandler(sys.stdout)
+    handler.setFormatter(FORMATTER)
+    return handler
 
 
 def get_timed_file_handler() -> TimedRotatingFileHandler:
-    """Gets a timed file handler to handle logging into files.
+    """Return the configured rotating file handler."""
 
-    Returns:
-        (TimedRotatingFileHandler): Output information into timed files.
-
-    """
-
-    # Creates a timed rotating file handler for logger
-    file_handler = TimedRotatingFileHandler(LOG_FILE, delay=True, when='midnight')
-    file_handler.setFormatter(FORMATTER)
-
-    return file_handler
+    handler = TimedRotatingFileHandler(LOG_FILE, delay=True, when="midnight")
+    handler.setFormatter(FORMATTER)
+    return handler
 
 
 def get_logger(logger_name: str) -> Logger:
-    """Gets a log and make it avaliable for further use.
+    """Return a configured logger without duplicating handlers."""
 
-    Args:
-        logger_name: The name of the logger.
-
-    Returns:
-        (Logger): Instance of the logger itself.
-
-    """
-
-    # Creates a logger object (also sets its level)
     logger = logging.getLogger(logger_name)
-    logger.setLevel(logging.DEBUG)
-
-    # Adds the desired handlers
-    logger.addHandler(get_console_handler())
-    logger.addHandler(get_timed_file_handler())
-
-    # True or False for propagating logs
-    logger.propagate = False
-
+    if not logger.handlers:
+        logger.setLevel(logging.DEBUG)
+        logger.addHandler(get_console_handler())
+        logger.addHandler(get_timed_file_handler())
+        logger.propagate = False
     return logger
