@@ -62,6 +62,13 @@ class SupervisedOPF(OPF):
         logger.debug("Finding prototypes ...")
 
         N = self.subgraph.n_nodes
+        if N == 0:
+            raise e.SizeError("Training data must contain at least one sample")
+        if (self.subgraph.labels == self.subgraph.labels[0]).all():
+            # Without a class boundary, one seed still defines a complete forest.
+            self.subgraph.status[0] = c.PROTOTYPE
+            return
+
         in_tree = torch.zeros(N, dtype=torch.bool, device=self.device)
         costs = torch.full((N,), c.FLOAT_MAX, dtype=torch.float64, device=self.device)
         preds = torch.full((N,), c.NIL, dtype=torch.int64, device=self.device)
@@ -188,12 +195,7 @@ class SupervisedOPF(OPF):
         self.subgraph = Subgraph(X_train, Y_train, I=I_train, device=str(self.device))
 
         # Compute full distance matrix ONCE — the main GPU-accelerated operation
-        if self.pre_computed_distance:
-            dist_matrix = self.pre_distances
-        else:
-            dist_matrix = self.distance_fn(
-                self.subgraph.features, self.subgraph.features
-            )
+        dist_matrix = self._get_distances()
 
         # Step 1: Find prototypes via MST
         self._find_prototypes(dist_matrix)
@@ -240,10 +242,7 @@ class SupervisedOPF(OPF):
         X_val = X_val.to(dtype=torch.float32, device=self.device)
 
         # Compute all train-test distances in one batch: (N_train, M_test)
-        if self.pre_computed_distance:
-            dist_matrix = self.pre_distances
-        else:
-            dist_matrix = self.distance_fn(self.subgraph.features, X_val)
+        dist_matrix = self._get_distances(X_val, I_val)
 
         # Minimax path costs: max(train_node_cost, arc_weight)
         train_costs = self.subgraph.costs.unsqueeze(1)  # (N, 1)
@@ -255,6 +254,7 @@ class SupervisedOPF(OPF):
         _, best_nodes = path_costs.min(dim=0)  # (M,)
 
         predictions = self.subgraph.pred_labels[best_nodes]
+        self.subgraph._mark_predecessors(best_nodes.unique().tolist())
 
         end = time.time()
         logger.info("Data has been predicted.")
@@ -269,6 +269,8 @@ class SupervisedOPF(OPF):
         X_val: torch.Tensor,
         Y_val: torch.Tensor,
         n_iterations: int = 10,
+        I_train: Optional[torch.Tensor] = None,
+        I_val: Optional[torch.Tensor] = None,
     ) -> None:
         """Learns the best classifier over a validation set.
 
@@ -280,37 +282,48 @@ class SupervisedOPF(OPF):
             Y_train: Training labels.
             X_val: Validation features.
             Y_val: Validation labels.
-            n_iterations: Maximum iterations.
+            n_iterations: Maximum iterations, at least one.
+            I_train: Original training indices in a pre-computed distance matrix.
+            I_val: Original validation indices in a pre-computed distance matrix.
 
         """
 
         logger.info("Learning the best classifier ...")
 
-        if not isinstance(X_train, torch.Tensor):
-            X_train = torch.tensor(X_train, dtype=torch.float32)
-        if not isinstance(Y_train, torch.Tensor):
-            Y_train = torch.tensor(Y_train, dtype=torch.int64)
-        if not isinstance(X_val, torch.Tensor):
-            X_val = torch.tensor(X_val, dtype=torch.float32)
-        if not isinstance(Y_val, torch.Tensor):
-            Y_val = torch.tensor(Y_val, dtype=torch.int64)
+        if not isinstance(n_iterations, int) or n_iterations < 1:
+            raise e.ValueError("`n_iterations` must be an integer >= 1")
 
-        X_train = X_train.clone()
-        Y_train = Y_train.clone()
-        X_val = X_val.clone()
-        Y_val = Y_val.clone()
+        X_train = torch.as_tensor(
+            X_train, dtype=torch.float32, device=self.device
+        ).clone()
+        Y_train = torch.as_tensor(
+            Y_train, dtype=torch.int64, device=self.device
+        ).clone()
+        X_val = torch.as_tensor(X_val, dtype=torch.float32, device=self.device).clone()
+        Y_val = torch.as_tensor(Y_val, dtype=torch.int64, device=self.device).clone()
+        I_train = (
+            torch.arange(len(X_train), device=self.device)
+            if I_train is None
+            else torch.as_tensor(I_train, device=self.device).clone()
+        )
+        I_val = (
+            torch.arange(len(X_val), device=self.device)
+            if I_val is None
+            else torch.as_tensor(I_val, device=self.device).clone()
+        )
 
-        max_acc = 0.0
+        max_acc = float("-inf")
         previous_acc = 0.0
         best_opf = None
+        best_t = 0
 
         t = 0
         while True:
             logger.info("Running iteration %d/%d ...", t + 1, n_iterations)
 
-            self.fit(X_train, Y_train)
-            preds = self.predict(X_val)
-            preds_tensor = torch.tensor(preds, dtype=torch.int64)
+            self.fit(X_train, Y_train, I_train)
+            preds = self.predict(X_val, I_val)
+            preds_tensor = torch.tensor(preds, dtype=torch.int64, device=self.device)
 
             acc = g.opf_accuracy(Y_val, preds_tensor)
             if acc > max_acc:
@@ -337,6 +350,10 @@ class SupervisedOPF(OPF):
                         Y_train[j], Y_val[err_idx] = (
                             Y_val[err_idx].clone(),
                             Y_train[j].clone(),
+                        )
+                        I_train[j], I_val[err_idx] = (
+                            I_val[err_idx].clone(),
+                            I_train[j].clone(),
                         )
                         n_non_proto -= 1
                         ctr = 0
@@ -367,43 +384,48 @@ class SupervisedOPF(OPF):
         X_val: torch.Tensor,
         Y_val: torch.Tensor,
         n_iterations: int = 10,
+        I_train: Optional[torch.Tensor] = None,
+        I_val: Optional[torch.Tensor] = None,
     ) -> None:
-        """Prunes the classifier by removing irrelevant nodes.
+        """Prunes irrelevant nodes while retaining prototypes of each class.
 
         Args:
             X_train: Training features.
             Y_train: Training labels.
             X_val: Validation features.
             Y_val: Validation labels.
-            n_iterations: Maximum iterations.
+            n_iterations: Maximum iterations, zero to fit without removing nodes.
+            I_train: Original training indices in a pre-computed distance matrix.
+            I_val: Original validation indices in a pre-computed distance matrix.
 
         """
 
         logger.info("Pruning classifier ...")
 
-        if not isinstance(X_train, torch.Tensor):
-            X_train = torch.tensor(X_train, dtype=torch.float32)
-        if not isinstance(Y_train, torch.Tensor):
-            Y_train = torch.tensor(Y_train, dtype=torch.int64)
+        if not isinstance(n_iterations, int) or n_iterations < 0:
+            raise e.ValueError("`n_iterations` must be an integer >= 0")
 
-        self.fit(X_train, Y_train)
-        self.predict(X_val)
+        self.fit(X_train, Y_train, I_train)
+        self.predict(X_val, I_val)
 
         initial_nodes = self.subgraph.n_nodes
 
         for t in range(n_iterations):
             logger.info("Running iteration %d/%d ...", t + 1, n_iterations)
 
-            # Keep only relevant nodes
-            relevant_mask = self.subgraph.relevant != c.IRRELEVANT
-            X_train = X_train[relevant_mask]
-            Y_train = Y_train[relevant_mask]
+            relevant_mask = (self.subgraph.relevant != c.IRRELEVANT) | (
+                self.subgraph.status == c.PROTOTYPE
+            )
+            if relevant_mask.all():
+                break
+            X_train = self.subgraph.features[relevant_mask]
+            Y_train = self.subgraph.labels[relevant_mask]
+            I_train = self.subgraph.indices[relevant_mask]
 
-            self.fit(X_train, Y_train)
-            preds = self.predict(X_val)
-            preds_tensor = torch.tensor(preds, dtype=torch.int64)
+            self.fit(X_train, Y_train, I_train)
+            preds = self.predict(X_val, I_val)
 
-            acc = g.opf_accuracy(Y_val, preds_tensor)
+            acc = g.opf_accuracy(Y_val, preds)
             logger.info("Current accuracy: %s.", acc)
 
         final_nodes = self.subgraph.n_nodes

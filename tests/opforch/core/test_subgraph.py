@@ -1,5 +1,7 @@
+import pytest
 import torch
 
+import opforch.utils.exception as e
 from opforch.core import subgraph
 from opforch.utils import constants
 
@@ -108,3 +110,37 @@ def test_subgraph_to():
     s.to("cpu")
 
     assert s.device == torch.device("cpu")
+
+
+def test_empty_subgraph_can_change_device():
+    s = subgraph.Subgraph(device="cpu").to("cpu")
+
+    assert s.indices.shape == (0,)
+    assert s.indices.dtype == torch.int64
+
+
+def test_mark_nodes_follows_the_complete_predecessor_chain():
+    s = subgraph.Subgraph(torch.zeros(4, 1), device="cpu")
+    s.preds = torch.tensor([constants.NIL, 0, 1, 2])
+
+    s.mark_nodes(3)
+    s.mark_nodes(3)
+
+    assert s.relevant.tolist() == [constants.RELEVANT] * 4
+    with pytest.raises(e.ValueError):
+        s.mark_nodes(constants.NIL)
+
+
+@pytest.mark.parametrize(
+    ("features", "labels", "indices", "error"),
+    [
+        (torch.zeros(2), None, None, e.SizeError),
+        (torch.zeros(2, 1), torch.zeros(1), None, e.SizeError),
+        (torch.zeros(2, 1), None, [0], e.SizeError),
+        (torch.zeros(2, 1), None, [-1, 0], e.ValueError),
+        (torch.zeros(2, 1), None, [0, 0.5], e.TypeError),
+    ],
+)
+def test_subgraph_validates_sample_alignment(features, labels, indices, error):
+    with pytest.raises(error):
+        subgraph.Subgraph(features, labels, indices, device="cpu")

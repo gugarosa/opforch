@@ -196,13 +196,19 @@ class UnsupervisedOPF(OPF):
         )
 
         max_distances = self.subgraph.create_arcs_from_matrix(dist_matrix, max_k)
+        neighbours = self.subgraph.adjacency
 
         min_cut = c.FLOAT_MAX
         best_k = min_k
 
         for k in range(min_k, max_k + 1):
             if min_cut != 0.0:
+                # Each candidate needs its own k-NN graph, not the previous plateaus.
+                self.subgraph.adjacency = neighbours[:, :k].clone()
+                self.subgraph.n_plateaus.zero_()
                 self.subgraph.density_val = max_distances[k - 1].item()
+                if self.subgraph.density_val < 1e-5:
+                    self.subgraph.density_val = 1.0
                 self.subgraph.best_k = k
                 self.subgraph.calculate_pdf_from_matrix(dist_matrix, k)
 
@@ -243,12 +249,7 @@ class UnsupervisedOPF(OPF):
         self.subgraph = KNNSubgraph(X_train, Y_train, I_train, device=str(self.device))
 
         # Compute distance matrix once
-        if self.pre_computed_distance:
-            dist_matrix = self.pre_distances
-        else:
-            dist_matrix = self.distance_fn(
-                self.subgraph.features, self.subgraph.features
-            )
+        dist_matrix = self._get_distances()
 
         self._best_minimum_cut(self.min_k, self.max_k, dist_matrix)
         self._clustering(self.subgraph.best_k)
@@ -290,10 +291,7 @@ class UnsupervisedOPF(OPF):
         X_val = X_val.to(dtype=torch.float32, device=self.device)
 
         # Compute train→test distances: (N_train, M_test)
-        if self.pre_computed_distance:
-            dist_matrix = self.pre_distances
-        else:
-            dist_matrix = self.distance_fn(self.subgraph.features, X_val)
+        dist_matrix = self._get_distances(X_val, I_val)
 
         best_k = self.subgraph.best_k
         # Find k-nearest training nodes for each test sample

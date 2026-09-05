@@ -60,8 +60,62 @@ The package also includes 47 distance metrics, OPF data loaders and
 converters, train/test split helpers, tensor-backed subgraphs, and the public
 `DeviceManager` API.
 
+Only load model checkpoints from trusted sources: whole-model `load()` uses
+Python object serialization.
+
 See [`examples/applications`](examples/applications) for complete classifier
 workflows.
+
+## Pre-computed distances
+
+A distance file contains a square matrix for the complete dataset. When
+splitting or reordering samples, pass their original **matrix row positions**
+so training and prediction select the correct rows and columns:
+
+```python
+from opforch.math.general import pre_compute_distance
+
+pre_compute_distance(X, "distances.pt", distance="euclidean")
+X_train, X_test, Y_train, Y_test, I_train, I_test = splitter.split_with_index(X, Y)
+
+model = SupervisedOPF(distance="euclidean", pre_computed_distance="distances.pt")
+model.fit(X_train, Y_train, I_train=I_train)
+predictions = model.predict(X_test, I_val=I_test)
+```
+
+The same indexing applies to all four classifiers and the `KNNSubgraph`
+distance wrappers. Indices must be non-negative integers within the matrix.
+`.pt` and `.pth` distance files use PyTorch's restricted tensor loader, not
+whole-model deserialization.
+Without explicit indices, each input is assumed to start at matrix position
+zero; sample IDs are not inferred from feature values.
+
+`SemiSupervisedOPF.fit()` accepts `I_unlabeled` for the unlabeled samples.
+Its default is the positions immediately following the labeled samples.
+`SupervisedOPF.learn()` and `prune()` accept `I_train` and `I_val`; indices
+follow samples when they are exchanged or removed.
+
+## Data and numerical contracts
+
+Features have shape `(n_samples, n_features)`, with one label and, when
+provided, one index per sample. Supervised and semi-supervised training
+support a single labeled class. A k-NN training graph requires
+`1 <= k < n_samples`, excluding self-neighbours.
+
+Supervised prediction marks its winning nodes and their predecessor paths
+as relevant. Pruning keeps these paths and class prototypes; it is not a
+guarantee of unchanged accuracy on other data.
+
+Label metrics require equally sized, non-empty vectors of non-negative
+integer class IDs. Classes are numbered from zero; validation subsets may
+omit classes. Confusion matrices include classes found only in predictions,
+and purity supports more clusters than ground-truth classes. OPF accuracy
+retains its false-positive/false-negative normalization, treating undefined
+error-rate terms as zero. It is not ordinary fraction-correct accuracy.
+
+Z-score normalization maps constant columns to zero. Min-max normalization
+through `get_distances(normalize=True)` likewise returns zeros for a
+constant distance matrix.
 
 ## Development
 

@@ -140,12 +140,7 @@ class KNNSupervisedOPF(OPF):
         self.subgraph = KNNSubgraph(X_train, Y_train, I_train, device=str(self.device))
 
         # Compute distance matrix once for all k values
-        if self.pre_computed_distance:
-            dist_matrix = self.pre_distances
-        else:
-            dist_matrix = self.distance_fn(
-                self.subgraph.features, self.subgraph.features
-            )
+        dist_matrix = self._get_distances()
 
         max_acc = 0.0
         best_k = 1
@@ -199,12 +194,7 @@ class KNNSupervisedOPF(OPF):
         self._learn(X_train, Y_train, I_train, X_val, Y_val, I_val)
 
         # Recompute distance matrix for final clustering
-        if self.pre_computed_distance:
-            dist_matrix = self.pre_distances
-        else:
-            dist_matrix = self.distance_fn(
-                self.subgraph.features, self.subgraph.features
-            )
+        dist_matrix = self._get_distances()
 
         self.subgraph.create_arcs_from_matrix(dist_matrix, self.subgraph.best_k)
         self.subgraph.calculate_pdf_from_matrix(dist_matrix, self.subgraph.best_k)
@@ -244,10 +234,7 @@ class KNNSupervisedOPF(OPF):
         X_test = X_test.to(dtype=torch.float32, device=self.device)
 
         # Compute train→test distances: (N_train, M_test)
-        if self.pre_computed_distance:
-            dist_matrix = self.pre_distances
-        else:
-            dist_matrix = self.distance_fn(self.subgraph.features, X_test)
+        dist_matrix = self._get_distances(X_test, I_test)
 
         best_k = self.subgraph.best_k
         # Find k-nearest training nodes for each test sample

@@ -50,6 +50,7 @@ class SemiSupervisedOPF(SupervisedOPF):
         Y_train: torch.Tensor,
         X_unlabeled: torch.Tensor,
         I_train: Optional[torch.Tensor] = None,
+        I_unlabeled: Optional[torch.Tensor] = None,
     ) -> None:
         """Fits the semi-supervised classifier.
 
@@ -61,7 +62,9 @@ class SemiSupervisedOPF(SupervisedOPF):
             X_train: Labeled training features of shape (N_l, D).
             Y_train: Training labels of shape (N_l,).
             X_unlabeled: Unlabeled features of shape (N_u, D).
-            I_train: Training indices.
+            I_train: Original labeled indices in a pre-computed distance matrix.
+            I_unlabeled: Original unlabeled indices. Defaults to the positions
+                immediately after the labeled samples.
 
         """
 
@@ -73,12 +76,7 @@ class SemiSupervisedOPF(SupervisedOPF):
         self.subgraph = Subgraph(X_train, Y_train, I=I_train, device=str(self.device))
 
         # Find prototypes from labeled data only
-        if self.pre_computed_distance:
-            labeled_dist = self.pre_distances
-        else:
-            labeled_dist = self.distance_fn(
-                self.subgraph.features, self.subgraph.features
-            )
+        labeled_dist = self._get_distances()
         self._find_prototypes(labeled_dist)
 
         # Append unlabeled samples to subgraph tensors
@@ -89,6 +87,9 @@ class SemiSupervisedOPF(SupervisedOPF):
         n_labeled = self.subgraph.n_nodes
         n_unlabeled = X_unlabeled.shape[0]
         n_total = n_labeled + n_unlabeled
+        if I_unlabeled is None:
+            I_unlabeled = torch.arange(n_labeled, n_total, device=self.device)
+        I_unlabeled = self.subgraph._to_indices(I_unlabeled, n_unlabeled)
 
         # Expand all tensors
         self.subgraph.features = torch.cat([self.subgraph.features, X_unlabeled], dim=0)
@@ -101,7 +102,7 @@ class SemiSupervisedOPF(SupervisedOPF):
         self.subgraph.indices = torch.cat(
             [
                 self.subgraph.indices,
-                torch.arange(n_labeled, n_total, dtype=torch.int64, device=self.device),
+                I_unlabeled,
             ]
         )
         self.subgraph.pred_labels = torch.cat(
@@ -172,12 +173,7 @@ class SemiSupervisedOPF(SupervisedOPF):
         )
 
         # Compute distance matrix for the combined data
-        if self.pre_computed_distance:
-            dist_matrix = self.pre_distances
-        else:
-            dist_matrix = self.distance_fn(
-                self.subgraph.features, self.subgraph.features
-            )
+        dist_matrix = self._get_distances()
 
         # Run optimum-path competition on combined labeled + unlabeled data
         self._compete(dist_matrix)

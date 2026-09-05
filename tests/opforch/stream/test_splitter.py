@@ -1,5 +1,7 @@
+import pytest
 import torch
 
+import opforch.utils.exception as e
 from opforch.stream import splitter
 
 
@@ -57,3 +59,13 @@ def test_merge():
 
     assert X.shape == (6, 2)
     assert Y.shape == (6,)
+
+
+def test_merge_rejects_cancelling_partition_mismatches():
+    with pytest.raises(e.SizeError):
+        splitter.merge(
+            torch.zeros(1, 1),
+            torch.ones(2, 1),
+            torch.zeros(2, dtype=torch.int64),
+            torch.ones(1, dtype=torch.int64),
+        )

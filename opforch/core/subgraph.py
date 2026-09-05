@@ -5,7 +5,7 @@ All per-node state lives as columns in this class, enabling
 batch operations and seamless GPU transfer.
 """
 
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 import numpy as np
 import torch
@@ -13,6 +13,7 @@ import torch
 import opforch.stream.parser as p
 import opforch.utils.constants as c
 import opforch.utils.exception as e
+from opforch.math.distance import DistanceFn
 from opforch.stream import loader
 from opforch.utils import logging
 from opforch.utils.device import DeviceManager
@@ -58,6 +59,7 @@ class Subgraph:
             # Empty subgraph — tensors will be initialized later
             self.features = torch.empty(0, device=self.device)
             self.labels = torch.empty(0, dtype=torch.int64, device=self.device)
+            self.indices = torch.empty(0, dtype=torch.int64, device=self.device)
             self._n_features = 0
             self._init_state_tensors(0)
             logger.error("Subgraph has not been properly created.")
@@ -76,6 +78,58 @@ class Subgraph:
             t = torch.tensor(arr)
 
         return t.to(dtype=dtype, device=self.device)
+
+    def _to_indices(self, indices, n: int) -> torch.Tensor:
+        if indices is None:
+            return torch.arange(n, dtype=torch.int64, device=self.device)
+
+        indices = torch.as_tensor(indices, device=self.device)
+        if indices.ndim != 1 or len(indices) != n:
+            raise e.SizeError("Indices must contain one entry per sample")
+        if n == 0:
+            return indices.to(dtype=torch.int64)
+        if indices.dtype not in (
+            torch.uint8,
+            torch.int8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+        ):
+            raise e.TypeError("Indices must be integers")
+        if (indices < 0).any():
+            raise e.ValueError("Indices must be non-negative")
+        return indices.to(dtype=torch.int64)
+
+    def _get_distances(
+        self,
+        distance_fn: DistanceFn,
+        pre_distances: Optional[torch.Tensor] = None,
+        X: Optional[torch.Tensor] = None,
+        I: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """Compute local distances or select both axes of a global distance matrix."""
+
+        if X is None:
+            X, I = self.features, self.indices
+        if pre_distances is None:
+            return distance_fn(self.features, X)
+
+        if not isinstance(pre_distances, torch.Tensor):
+            raise e.TypeError("Pre-computed distances must be a tensor")
+        if pre_distances.ndim != 2 or pre_distances.shape[0] != pre_distances.shape[1]:
+            raise e.SizeError("Pre-computed distances must be a square matrix")
+        columns = self._to_indices(I, len(X))
+        if (self.indices >= len(pre_distances)).any() or (
+            columns >= len(pre_distances)
+        ).any():
+            raise e.ValueError("Sample indices exceed the pre-computed distance matrix")
+
+        pre_distances = pre_distances.to(device=self.device)
+        if pre_distances.is_complex():
+            raise e.TypeError("Pre-computed distances must be real-valued")
+        if not pre_distances.is_floating_point():
+            pre_distances = pre_distances.to(dtype=torch.float64)
+        return pre_distances[self.indices[:, None], columns]
 
     def _load(self, file_path: str) -> Tuple[torch.Tensor, torch.Tensor]:
         """Loads and parses a dataframe from a file.
@@ -148,6 +202,8 @@ class Subgraph:
         """
 
         self.features = self._to_tensor(X, dtype=torch.float32)
+        if self.features.ndim != 2:
+            raise e.SizeError("Features must have shape (n_samples, n_features)")
 
         n = self.features.shape[0]
 
@@ -155,11 +211,10 @@ class Subgraph:
             self.labels = self._to_tensor(Y, dtype=torch.int64)
         else:
             self.labels = torch.zeros(n, dtype=torch.int64, device=self.device)
+        if self.labels.ndim != 1 or len(self.labels) != n:
+            raise e.SizeError("Labels must contain one entry per sample")
 
-        if I is not None:
-            self.indices = self._to_tensor(I, dtype=torch.int64)
-        else:
-            self.indices = torch.arange(n, dtype=torch.int64, device=self.device)
+        self.indices = self._to_indices(I, n)
 
         self._n_features = self.features.shape[1] if self.features.dim() > 1 else 0
 
@@ -224,11 +279,25 @@ class Subgraph:
 
         """
 
-        while self.preds[i].item() != c.NIL:
-            self.relevant[i] = c.RELEVANT
-            i = self.preds[i].item()
+        self._mark_predecessors([i])
 
-        self.relevant[i] = c.RELEVANT
+    def _mark_predecessors(self, indices: List[int]) -> None:
+        if not indices:
+            return
+        if any(not 0 <= i < self.n_nodes for i in indices):
+            raise e.ValueError("Node index is outside the subgraph")
+
+        # Traverse on the CPU in one batch, avoiding a device sync per predecessor.
+        preds = self.preds.tolist()
+        relevant = self.relevant.tolist()
+        marked = []
+        for i in indices:
+            while i != c.NIL and relevant[i] != c.RELEVANT:
+                relevant[i] = c.RELEVANT
+                marked.append(i)
+                i = preds[i]
+        if marked:
+            self.relevant[marked] = c.RELEVANT
 
     def reset(self) -> None:
         """Resets predecessors, relevance flags, and arcs."""
