@@ -72,6 +72,7 @@ this document defines the standards for changing it.
 - Use bare assertions without failure-message strings. Test names describe the expectation.
 - Separate successful behavior from expected failures. Use `pytest.raises` rather than catching arbitrary exceptions.
 - Cover observable contracts, not incidental implementation structure.
+- Use pytest's importlib mode so the mirrored test directories cannot shadow the installed package.
 - Use the existing pytest, Black, isort, Flake8, Sphinx, and uv tooling.
 - Black, isort, and Flake8 use 120 columns. Formatting does not replace review of documentation or logical grouping.
 
