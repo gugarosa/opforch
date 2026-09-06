@@ -1,3 +1,5 @@
+import pickle
+
 import pytest
 import torch
 
@@ -60,6 +62,14 @@ def test_opf_read_distances():
     assert clf.pre_distances.shape == (100, 4)
 
 
+def test_distance_files_do_not_load_arbitrary_python_objects(tmp_path):
+    output = tmp_path / "not-a-distance-tensor.pt"
+    torch.save(tmp_path, output)
+
+    with pytest.raises(pickle.UnpicklingError):
+        opf.OPF(pre_computed_distance=str(output), device="cpu")
+
+
 def test_opf_save_and_load(tmp_path):
     clf = opf.OPF(distance="bray_curtis")
     output = tmp_path / "model.pt"
@@ -92,3 +102,10 @@ def test_opf_to():
     clf.to("cpu")
 
     assert clf.device == torch.device("cpu")
+
+
+def test_normalized_constant_distances_are_zero():
+    clf = opf.OPF(distance="euclidean", device="cpu")
+    clf.subgraph = Subgraph(torch.ones(3, 2), device="cpu")
+
+    torch.testing.assert_close(clf.get_distances(normalize=True), torch.zeros(3, 3))

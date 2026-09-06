@@ -78,7 +78,9 @@ class OPF:
         extension = file_name.split(".")[-1]
 
         if extension in ("pt", "pth"):
-            distances = torch.load(file_name, map_location=self.device)
+            distances = torch.load(
+                file_name, map_location=self.device, weights_only=True
+            )
         elif extension == "csv":
             import numpy as np
 
@@ -108,21 +110,39 @@ class OPF:
         """Computes the full distance matrix for the training subgraph.
 
         Args:
-            normalize: Whether to min-max normalize the matrix.
+            normalize: Whether to min-max normalize the matrix. Constant matrices
+                normalize to zeros.
 
         Returns:
             Distance matrix of shape (N, N).
 
         """
 
-        distances = self.distance_fn(self.subgraph.features, self.subgraph.features)
+        distances = self._get_distances()
 
         if normalize:
             d_min = distances.min()
             d_max = distances.max()
-            return (distances - d_min) / (d_max - d_min)
+            scale = d_max - d_min
+            return (distances - d_min) / torch.where(scale == 0, 1, scale)
 
         return distances
+
+    def _get_distances(
+        self,
+        X: Optional[torch.Tensor] = None,
+        I: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        if self.subgraph is None:
+            raise e.BuildError("Subgraph has not been properly created")
+        if self.pre_computed_distance and self.pre_distances is None:
+            raise e.BuildError("Pre-computed distances have not been loaded")
+        return self.subgraph._get_distances(
+            self.distance_fn,
+            self.pre_distances if self.pre_computed_distance else None,
+            X,
+            I,
+        )
 
     def to(self, device) -> "OPF":
         """Moves the entire model to a device.

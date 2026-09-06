@@ -59,11 +59,11 @@ def merge(
     """Merge two feature and label partitions."""
 
     logger.info("Merging data ...")
+    if X_1.shape[0] != Y_1.shape[0] or X_2.shape[0] != Y_2.shape[0]:
+        raise e.SizeError(
+            "Each feature partition and its labels must have the same number of samples"
+        )
     X = torch.cat((X_1, X_2))
     Y = torch.cat((Y_1, Y_2))
-    if X.shape[0] != Y.shape[0]:
-        raise e.SizeError(
-            "`(X_1, X_2)` and `(Y_1, Y_2)` should have the same number of samples"
-        )
     logger.info("Data merged.")
     return X, Y

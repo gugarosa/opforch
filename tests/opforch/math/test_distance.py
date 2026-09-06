@@ -113,6 +113,24 @@ def test_hassanat_distance():
     assert dist.item() > 0
 
 
+def test_hassanat_distance_with_negative_features():
+    left = torch.tensor([[-2.0], [-1.0], [0.0]])
+    right = torch.tensor([[-1.0], [1.0]])
+
+    actual = distance.hassanat_distance(left, right)
+
+    torch.testing.assert_close(
+        actual, torch.tensor([[0.5, 0.75], [0.0, 2 / 3], [0.5, 0.5]])
+    )
+
+    for dtype in (torch.float32, torch.float64):
+        identical = torch.tensor([[-1e20]], dtype=dtype)
+        torch.testing.assert_close(
+            distance.hassanat_distance(identical, identical),
+            torch.zeros(1, 1, dtype=dtype),
+        )
+
+
 def test_hellinger_distance():
     dist = distance.hellinger_distance(x, y)
     assert dist.shape == (1, 1)

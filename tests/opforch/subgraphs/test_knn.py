@@ -1,5 +1,7 @@
+import pytest
 import torch
 
+import opforch.utils.exception as e
 from opforch.math import distance
 from opforch.stream import loader, parser
 from opforch.subgraphs import knn
@@ -140,3 +142,39 @@ def test_knn_subgraph_destroy_arcs():
     subgraph.destroy_arcs()
 
     assert subgraph.adjacency is None
+
+
+def test_plateaus_preserve_a_packed_neighbour_prefix():
+    subgraph = knn.KNNSubgraph(torch.arange(4.0).reshape(-1, 1), device="cpu")
+    subgraph.adjacency = torch.tensor([[1], [0], [1], [2]])
+    subgraph.densities.fill_(1000)
+
+    subgraph.insert_plateaus(1)
+
+    assert subgraph.adjacency.tolist() == [[1, -1], [2, 0], [3, 1], [2, -1]]
+    assert subgraph.n_plateaus.tolist() == [0, 1, 1, 0]
+
+
+def test_precomputed_arcs_and_pdf_use_original_indices():
+    features = torch.tensor([[0.0], [1.0], [9.0], [10.0]])
+    indices = torch.tensor([3, 0, 2])
+    distances = torch.cdist(features, features)
+    direct = knn.KNNSubgraph(features[indices], device="cpu")
+    stored = knn.KNNSubgraph(features[indices], I=indices, device="cpu")
+
+    direct.create_arcs(1, distance.euclidean_distance)
+    direct.calculate_pdf(1, distance.euclidean_distance)
+    stored.create_arcs(1, distance.euclidean_distance, True, distances)
+    stored.calculate_pdf(1, distance.euclidean_distance, True, distances)
+
+    torch.testing.assert_close(stored.adjacency, direct.adjacency)
+    torch.testing.assert_close(stored.radii, direct.radii)
+    torch.testing.assert_close(stored.densities, direct.densities)
+
+
+@pytest.mark.parametrize("k", [0, 3, 4])
+def test_knn_rejects_neighbour_counts_that_include_self(k):
+    subgraph = knn.KNNSubgraph(torch.arange(3.0).reshape(-1, 1), device="cpu")
+
+    with pytest.raises(e.ValueError, match="k"):
+        subgraph.create_arcs(k, distance.euclidean_distance)

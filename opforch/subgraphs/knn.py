@@ -7,6 +7,7 @@ import torch
 import opforch.utils.constants as c
 import opforch.utils.exception as e
 from opforch.core.subgraph import Subgraph
+from opforch.math.distance import DistanceFn
 from opforch.utils import logging
 
 logger = logging.get_logger(__name__)
@@ -60,7 +61,7 @@ class KNNSubgraph(Subgraph):
     def create_arcs(
         self,
         k: int,
-        distance_fn: callable,
+        distance_fn: DistanceFn,
         pre_computed_distance: bool = False,
         pre_distances: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
@@ -80,10 +81,11 @@ class KNNSubgraph(Subgraph):
 
         """
 
-        if pre_computed_distance and pre_distances is not None:
-            dist_matrix = pre_distances
-        else:
-            dist_matrix = distance_fn(self.features, self.features)
+        if pre_computed_distance and pre_distances is None:
+            raise e.BuildError("Pre-computed distances have not been loaded")
+        dist_matrix = self._get_distances(
+            distance_fn, pre_distances if pre_computed_distance else None
+        )
 
         return self.create_arcs_from_matrix(dist_matrix, k)
 
@@ -94,12 +96,17 @@ class KNNSubgraph(Subgraph):
 
         Args:
             dist_matrix: Distance matrix of shape (N, N).
-            k: Number of nearest neighbours.
+            k: Number of nearest neighbours, from 1 to N - 1.
 
         Returns:
             Tensor of maximum distances per k-position, shape (k,).
 
         """
+
+        if not 1 <= k < self.n_nodes:
+            raise e.ValueError("`k` must be an integer between 1 and n_nodes - 1")
+        if dist_matrix.shape != (self.n_nodes, self.n_nodes):
+            raise e.SizeError("Distance matrix must have shape (n_nodes, n_nodes)")
 
         # Exclude self-loops by setting diagonal to infinity
         dist_no_self = dist_matrix.clone()
@@ -136,7 +143,7 @@ class KNNSubgraph(Subgraph):
     def calculate_pdf(
         self,
         n_neighbours: int,
-        distance_fn: callable,
+        distance_fn: DistanceFn,
         pre_computed_distance: bool = False,
         pre_distances: Optional[torch.Tensor] = None,
     ) -> None:
@@ -152,10 +159,11 @@ class KNNSubgraph(Subgraph):
 
         """
 
-        if pre_computed_distance and pre_distances is not None:
-            dist_matrix = pre_distances
-        else:
-            dist_matrix = distance_fn(self.features, self.features)
+        if pre_computed_distance and pre_distances is None:
+            raise e.BuildError("Pre-computed distances have not been loaded")
+        dist_matrix = self._get_distances(
+            distance_fn, pre_distances if pre_computed_distance else None
+        )
 
         self.calculate_pdf_from_matrix(dist_matrix, n_neighbours)
 
@@ -276,7 +284,7 @@ class KNNSubgraph(Subgraph):
                     new_adj[i, :n_extra] = torch.tensor(
                         extras, dtype=torch.int64, device=self.adjacency.device
                     )
-                new_adj[i, max_extra : max_extra + k_orig] = self.adjacency[i]
+                new_adj[i, n_extra : n_extra + k_orig] = self.adjacency[i]
                 self.n_plateaus[i] = len(extras)
 
             self.adjacency = new_adj

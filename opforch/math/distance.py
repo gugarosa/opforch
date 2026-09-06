@@ -345,13 +345,8 @@ def hassanat_distance(X: torch.Tensor, Y: torch.Tensor) -> torch.Tensor:
     mn = torch.minimum(Xe, Ye)
     mx = torch.maximum(Xe, Ye)
 
-    # Compute both branches
-    pos = 1 - (1 + mn) / (1 + mx)
-    neg = 1 - (1 + mn + mn.abs()) / (1 + mx + mn.abs())
-
-    mask = (mn >= 0).float()
-    d = mask * pos + (1 - mask) * neg
-    return d.sum(dim=-1)
+    denominator = 1 + torch.where(mn < 0, mx - mn, mx)
+    return (1 - (1 + mn.clamp(min=0)) / denominator).sum(dim=-1)
 
 
 # ---------------------------------------------------------------------------
