@@ -1,31 +1,36 @@
+# Copyright (c) 2026 Gustavo de Rosa.
+# Licensed under the Apache License, Version 2.0.
+
+"""Cluster the boat dataset and evaluate labels propagated from cluster roots.
+
+Run this example from the repository root after installing OPForch.
+
+"""
+
+from pathlib import Path
+
 import opforch.math.general as g
 import opforch.stream.parser as p
 import opforch.stream.splitter as s
-from opforch.models import UnsupervisedOPF
+from opforch.models.unsupervised import UnsupervisedOPF
 from opforch.stream import loader
 
-# Loading a .txt file to a tensor
-txt = loader.load_txt("data/boat.txt")
+data_path = Path("data", "boat.txt")
+txt = loader.load_txt(str(data_path))
+if txt is None:
+    raise OSError(f"`data_path` could not be loaded, but got {data_path}.")
 
-# Parsing the loaded tensor
 X, Y = p.parse_loader(txt)
+if X is None or Y is None:
+    raise ValueError("`data` could not be parsed as an OPF table.")
 
-# Splitting data into training and testing sets
 X_train, X_test, Y_train, Y_test = s.split(X, Y, percentage=0.5, random_state=1)
 
-# Creates an UnsupervisedOPF instance (use device='cuda' for GPU)
 opf = UnsupervisedOPF(min_k=1, max_k=10, distance="log_squared_euclidean", device="cpu")
-
-# Fits training data for clustering
 opf.fit(X_train, Y_train)
 
-# Propagate labels from cluster roots if data is labeled
 opf.propagate_labels()
-
-# Predicts new data
 preds, clusters = opf.predict(X_test)
-
-# Calculating accuracy
 acc = g.opf_accuracy(Y_test, preds)
 
 print(f"Accuracy: {acc}")

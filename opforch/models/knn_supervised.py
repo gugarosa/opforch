@@ -1,71 +1,67 @@
-"""KNN-Supervised Optimum-Path Forest (PyTorch)."""
+# Copyright (c) 2026 Gustavo de Rosa.
+# Licensed under the Apache License, Version 2.0.
+
+"""Train density-based supervised forests over k-nearest-neighbour graphs.
+
+References:
+    J. P. Papa and A. X. Falcão, A Learning Algorithm for the Optimum-Path Forest Classifier (2009).
+
+"""
+
+from __future__ import annotations
 
 import time
-from typing import List, Optional
 
 import torch
 
 import opforch.math.general as g
 import opforch.utils.constants as c
 import opforch.utils.exception as e
-from opforch.core import OPF, Heap
-from opforch.subgraphs import KNNSubgraph
-from opforch.utils import logging
+from opforch.core.heap import Heap
+from opforch.core.opf import OPF
+from opforch.subgraphs.knn import KNNSubgraph
+from opforch.utils.logging import get_logger
 
-logger = logging.get_logger(__name__)
+logger = get_logger(__name__)
 
 
 class KNNSupervisedOPF(OPF):
-    """KNN-Supervised OPF with batched KNN via torch.topk.
+    """Classify samples with validation-selected k-nearest-neighbour forests.
 
-    References:
-        J. P. Papa and A. X. Falcão.
-        A Learning Algorithm for the Optimum-Path Forest Classifier.
-        Graph-Based Representations in Pattern Recognition (2009).
-
-    """
+    """  # fmt: skip
 
     def __init__(
         self,
         max_k: int = 1,
         distance: str = "log_squared_euclidean",
-        pre_computed_distance: Optional[str] = None,
-        device: Optional[str] = None,
+        pre_computed_distance: str | None = None,
+        device: str | torch.device | None = None,
     ) -> None:
-        """Initialization method.
+        """Initialize a k-nearest-neighbour supervised classifier.
 
         Args:
             max_k: Maximum k value for KNN adjacency.
             distance: Distance metric name.
             pre_computed_distance: Path to pre-computed distance file.
-            device: Target device string.
+            device: Target device, or automatic CUDA/CPU selection when None.
+
+        Raises:
+            e.ValueError: The maximum neighbour count is not a positive integer.
 
         """
 
-        logger.info("Overriding class: OPF -> KNNSupervisedOPF.")
+        logger.info("Creating k-nearest-neighbour supervised OPF classifier.")
 
-        super(KNNSupervisedOPF, self).__init__(distance, pre_computed_distance, device)
+        super().__init__(distance, pre_computed_distance, device)
 
         if not isinstance(max_k, int) or max_k < 1:
-            raise e.ValueError("`max_k` should be an integer >= 1")
+            raise e.ValueError(f"`max_k` must be a positive integer, but got {max_k}.")
 
         self.max_k = max_k
 
-        logger.info("Class overrided.")
-
     def _clustering(self, force_prototype: bool = False) -> None:
-        """Clusters the subgraph using density-based competition.
-
-        Uses a max-heap where nodes compete via min(parent_cost, node_density).
-
-        Args:
-            force_prototype: Whether to force each class to have at least one prototype.
-
-        """
-
         N = self.subgraph.n_nodes
 
-        # Insert reciprocal adjacency for equal-density nodes (plateau detection)
         if self.subgraph.adjacency is not None:
             self.subgraph.insert_plateaus(self.subgraph.adjacency.shape[1])
 
@@ -89,7 +85,6 @@ class KNNSupervisedOPF(OPF):
 
             self.subgraph.costs[p] = h.cost[p]
 
-            # Iterate over adjacency
             if self.subgraph.adjacency is not None:
                 adj = self.subgraph.adjacency[p]
                 for qi in range(adj.numel()):
@@ -98,9 +93,7 @@ class KNNSupervisedOPF(OPF):
                         continue
 
                     if h.color[q] != c.BLACK:
-                        current_cost = min(
-                            h.cost[p].item(), self.subgraph.densities[q].item()
-                        )
+                        current_cost = min(h.cost[p].item(), self.subgraph.densities[q].item())
 
                         if force_prototype:
                             if self.subgraph.labels[p] != self.subgraph.labels[q]:
@@ -116,30 +109,15 @@ class KNNSupervisedOPF(OPF):
         self,
         X_train: torch.Tensor,
         Y_train: torch.Tensor,
-        I_train: Optional[torch.Tensor],
+        I_train: torch.Tensor | None,
         X_val: torch.Tensor,
         Y_val: torch.Tensor,
-        I_val: Optional[torch.Tensor],
-    ) -> None:
-        """Learns the best k value over the validation set.
-
-        Computes the distance matrix once, then iterates over k values.
-
-        Args:
-            X_train: Training features.
-            Y_train: Training labels.
-            I_train: Training indices.
-            X_val: Validation features.
-            Y_val: Validation labels.
-            I_val: Validation indices.
-
-        """
-
-        logger.info("Learning best `k` value ...")
+        I_val: torch.Tensor | None,
+    ) -> torch.Tensor:
+        logger.info("Learning the best neighbour count.")
 
         self.subgraph = KNNSubgraph(X_train, Y_train, I_train, device=str(self.device))
 
-        # Compute distance matrix once for all k values
         dist_matrix = self._get_distances()
 
         max_acc = 0.0
@@ -153,7 +131,7 @@ class KNNSupervisedOPF(OPF):
 
             self._clustering()
 
-            preds = self.predict(X_val, I_val)
+            preds = self._predict(X_val, I_val)
 
             acc = g.opf_accuracy(Y_val, preds)
             if acc > max_acc:
@@ -166,24 +144,34 @@ class KNNSupervisedOPF(OPF):
 
         self.subgraph.best_k = best_k
 
+        return dist_matrix
+
     def fit(
         self,
         X_train: torch.Tensor,
         Y_train: torch.Tensor,
         X_val: torch.Tensor,
         Y_val: torch.Tensor,
-        I_train: Optional[torch.Tensor] = None,
-        I_val: Optional[torch.Tensor] = None,
+        I_train: torch.Tensor | None = None,
+        I_val: torch.Tensor | None = None,
     ) -> None:
-        """Fits data in the classifier.
+        """Replace the fitted graph using validation-selected neighbour counts.
+
+        Each candidate competes through minimum parent-cost/node-density paths.
+        The training distance matrix is reused for all candidates and the final
+        graph. Final competition preserves a prototype for each class.
 
         Args:
-            X_train: Training features.
-            Y_train: Training labels.
-            X_val: Validation features.
-            Y_val: Validation labels.
-            I_train: Training indices.
-            I_val: Validation indices.
+            X_train: Training features of shape (N, D).
+            Y_train: Training labels of shape (N,).
+            X_val: Validation features of shape (M, D).
+            Y_val: Validation labels of shape (M,).
+            I_train: Original matrix positions for training samples.
+            I_val: Original matrix positions for validation samples.
+
+        Raises:
+            e.SizeError: Feature, label, or index dimensions do not align.
+            e.ValueError: A neighbour count or original sample index is invalid.
 
         """
 
@@ -191,10 +179,7 @@ class KNNSupervisedOPF(OPF):
 
         start = time.time()
 
-        self._learn(X_train, Y_train, I_train, X_val, Y_val, I_val)
-
-        # Recompute distance matrix for final clustering
-        dist_matrix = self._get_distances()
+        dist_matrix = self._learn(X_train, Y_train, I_train, X_val, Y_val, I_val)
 
         self.subgraph.create_arcs_from_matrix(dist_matrix, self.subgraph.best_k)
         self.subgraph.calculate_pdf_from_matrix(dist_matrix, self.subgraph.best_k)
@@ -212,20 +197,30 @@ class KNNSupervisedOPF(OPF):
     def predict(
         self,
         X_test: torch.Tensor,
-        I_test: Optional[torch.Tensor] = None,
-    ) -> List[int]:
-        """Predicts new data using batched KNN + density competition.
+        I_test: torch.Tensor | None = None,
+    ) -> list[int]:
+        """Predict labels with the fitted neighbour count and density forest.
 
         Args:
             X_test: Test features of shape (M, D).
-            I_test: Test indices.
+            I_test: Original matrix positions for test samples.
 
         Returns:
-            A list of predicted labels.
+            One predicted class label per input row, in input order.
+
+        Raises:
+            e.BuildError: The classifier has not completed a successful fit.
+            e.SizeError: Precomputed distance or index dimensions are invalid.
+            e.ValueError: Original sample indices are outside the distance matrix.
 
         """
 
-        logger.info("Predicting data ...")
+        self._check_fitted()
+
+        return self._predict(X_test, I_test)
+
+    def _predict(self, X_test: torch.Tensor, I_test: torch.Tensor | None = None) -> list[int]:
+        logger.info("Predicting data.")
 
         start = time.time()
 
@@ -233,29 +228,9 @@ class KNNSupervisedOPF(OPF):
             X_test = torch.tensor(X_test, dtype=torch.float32)
         X_test = X_test.to(dtype=torch.float32, device=self.device)
 
-        # Compute train→test distances: (N_train, M_test)
         dist_matrix = self._get_distances(X_test, I_test)
 
-        best_k = self.subgraph.best_k
-        # Find k-nearest training nodes for each test sample
-        knn_dists, knn_idx = dist_matrix.topk(best_k, dim=0, largest=False)
-        # knn_dists: (k, M), knn_idx: (k, M)
-
-        # Compute density for each test sample
-        density = torch.exp(-knn_dists / self.subgraph.constant).mean(dim=0)  # (M,)
-        density = (
-            (c.MAX_DENSITY - 1)
-            * (density - self.subgraph.min_density)
-            / (self.subgraph.max_density - self.subgraph.min_density + c.EPSILON)
-        ) + 1
-
-        # Find best conqueror among k-NN
-        neighbour_costs = self.subgraph.costs[knn_idx]  # (k, M)
-        compete_costs = torch.minimum(neighbour_costs, density.unsqueeze(0))  # (k, M)
-        best_k_idx = compete_costs.argmax(dim=0)  # (M,)
-
-        # Gather predictions
-        best_neighbours = knn_idx.gather(0, best_k_idx.unsqueeze(0)).squeeze(0)
+        best_neighbours = self.subgraph._conquerors(dist_matrix)
         predictions = self.subgraph.pred_labels[best_neighbours]
 
         end = time.time()

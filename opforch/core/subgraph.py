@@ -1,11 +1,17 @@
-"""Tensor-first Subgraph for the Optimum-Path Forest.
+# Copyright (c) 2026 Gustavo de Rosa.
+# Licensed under the Apache License, Version 2.0.
 
-Replaces the OPFython Node + Subgraph pair with dense tensors.
-All per-node state lives as columns in this class, enabling
-batch operations and seamless GPU transfer.
+"""Store sample data and aligned OPF state as dense tensors.
+
+Features use float32 storage. Labels, indices, predecessors, roots, and cluster
+assignments use int64. Costs, densities, and radii use float64, while status and
+relevance flags use int8.
+
 """
 
-from typing import List, Optional, Tuple
+from __future__ import annotations
+
+from typing import Any, Self
 
 import numpy as np
 import torch
@@ -15,35 +21,42 @@ import opforch.utils.constants as c
 import opforch.utils.exception as e
 from opforch.math.distance import DistanceFn
 from opforch.stream import loader
-from opforch.utils import logging
 from opforch.utils.device import DeviceManager
+from opforch.utils.logging import get_logger
 
-logger = logging.get_logger(__name__)
+logger = get_logger(__name__)
 
 
 class Subgraph:
-    """A tensor-based collection of nodes forming the OPF subgraph.
+    """Represent samples and their aligned OPF graph state.
 
-    All per-node attributes are stored as dense 1-D or 2-D tensors,
-    enabling vectorized operations and device transfer.
-    """
+    """  # fmt: skip
 
     def __init__(
         self,
-        X: Optional[torch.Tensor] = None,
-        Y: Optional[torch.Tensor] = None,
-        I: Optional[torch.Tensor] = None,
-        from_file: Optional[str] = None,
-        device: Optional[str] = None,
+        X: torch.Tensor | None = None,
+        Y: torch.Tensor | None = None,
+        I: torch.Tensor | None = None,
+        from_file: str | None = None,
+        device: str | torch.device | None = None,
     ) -> None:
-        """Initialization method.
+        """Initialize graph data and per-node state.
+
+        Tensor or NumPy storage can be shared when conversion is unnecessary.
+        Callers must not modify shared sample data while the graph is in use.
 
         Args:
-            X: Feature array/tensor of shape (N, D).
-            Y: Label array/tensor of shape (N,).
-            I: Index array/tensor of shape (N,).
-            from_file: Path to load data from (.csv, .txt, or .json).
-            device: Target device string (e.g. 'cpu', 'cuda').
+            X: Feature array or tensor of shape (N, D), or None for an empty graph.
+            Y: Label array or tensor of shape (N,), or None to initialize zero labels.
+            I: Original indices of shape (N,), or None to use sample positions.
+            from_file: CSV, TXT, or JSON data path that replaces X and Y when provided.
+            device: Target device, or automatic CUDA/CPU selection when None.
+
+        Raises:
+            e.ArgumentError: The input file extension is unsupported.
+            e.SizeError: Feature, label, or index dimensions do not align.
+            e.TypeError: Sample indices are not integers.
+            e.ValueError: Sample indices are negative.
 
         """
 
@@ -56,17 +69,14 @@ class Subgraph:
         if X is not None:
             self._build(X, Y, I)
         else:
-            # Empty subgraph — tensors will be initialized later
             self.features = torch.empty(0, device=self.device)
             self.labels = torch.empty(0, dtype=torch.int64, device=self.device)
             self.indices = torch.empty(0, dtype=torch.int64, device=self.device)
             self._n_features = 0
             self._init_state_tensors(0)
-            logger.error("Subgraph has not been properly created.")
+            logger.debug("Created an empty subgraph.")
 
-    def _to_tensor(self, arr, dtype=torch.float32) -> torch.Tensor:
-        """Converts numpy arrays, lists, or existing tensors to the target device."""
-
+    def _to_tensor(self, arr: Any, dtype: torch.dtype = torch.float32) -> torch.Tensor | None:
         if arr is None:
             return None
 
@@ -79,13 +89,13 @@ class Subgraph:
 
         return t.to(dtype=dtype, device=self.device)
 
-    def _to_indices(self, indices, n: int) -> torch.Tensor:
+    def _to_indices(self, indices: Any, n: int) -> torch.Tensor:
         if indices is None:
             return torch.arange(n, dtype=torch.int64, device=self.device)
 
         indices = torch.as_tensor(indices, device=self.device)
         if indices.ndim != 1 or len(indices) != n:
-            raise e.SizeError("Indices must contain one entry per sample")
+            raise e.SizeError(f"`indices` must contain one entry per sample, but got shape {tuple(indices.shape)}.")
         if n == 0:
             return indices.to(dtype=torch.int64)
         if indices.dtype not in (
@@ -95,53 +105,42 @@ class Subgraph:
             torch.int32,
             torch.int64,
         ):
-            raise e.TypeError("Indices must be integers")
+            raise e.TypeError(f"`indices` must contain integers, but got {indices.dtype}.")
         if (indices < 0).any():
-            raise e.ValueError("Indices must be non-negative")
+            raise e.ValueError("`indices` must be non-negative.")
+
         return indices.to(dtype=torch.int64)
 
     def _get_distances(
         self,
         distance_fn: DistanceFn,
-        pre_distances: Optional[torch.Tensor] = None,
-        X: Optional[torch.Tensor] = None,
-        I: Optional[torch.Tensor] = None,
+        pre_distances: torch.Tensor | None = None,
+        X: torch.Tensor | None = None,
+        I: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """Compute local distances or select both axes of a global distance matrix."""
-
         if X is None:
             X, I = self.features, self.indices
         if pre_distances is None:
             return distance_fn(self.features, X)
 
         if not isinstance(pre_distances, torch.Tensor):
-            raise e.TypeError("Pre-computed distances must be a tensor")
+            raise e.TypeError("`pre_distances` must be a tensor.")
         if pre_distances.ndim != 2 or pre_distances.shape[0] != pre_distances.shape[1]:
-            raise e.SizeError("Pre-computed distances must be a square matrix")
+            raise e.SizeError("`pre_distances` must be a square matrix.")
+
         columns = self._to_indices(I, len(X))
-        if (self.indices >= len(pre_distances)).any() or (
-            columns >= len(pre_distances)
-        ).any():
-            raise e.ValueError("Sample indices exceed the pre-computed distance matrix")
+        if (self.indices >= len(pre_distances)).any() or (columns >= len(pre_distances)).any():
+            raise e.ValueError("`indices` must be within the precomputed distance matrix.")
 
         pre_distances = pre_distances.to(device=self.device)
         if pre_distances.is_complex():
-            raise e.TypeError("Pre-computed distances must be real-valued")
+            raise e.TypeError("`pre_distances` must be real-valued.")
         if not pre_distances.is_floating_point():
             pre_distances = pre_distances.to(dtype=torch.float64)
+
         return pre_distances[self.indices[:, None], columns]
 
-    def _load(self, file_path: str) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Loads and parses a dataframe from a file.
-
-        Args:
-            file_path: File to be loaded.
-
-        Returns:
-            Tuple of (features, labels) tensors.
-
-        """
-
+    def _load(self, file_path: str) -> tuple[torch.Tensor | None, torch.Tensor | None]:
         extension = file_path.split(".")[-1]
 
         if extension == "csv":
@@ -151,22 +150,13 @@ class Subgraph:
         elif extension == "json":
             data = loader.load_json(file_path)
         else:
-            raise e.ArgumentError(
-                "File extension not recognized. It should be `.csv`, `.json` or `.txt`"
-            )
+            raise e.ArgumentError(f"`file_path` must end in .csv, .json, or .txt, but got {file_path!r}.")
 
         X, Y = p.parse_loader(data)
 
         return X, Y
 
     def _init_state_tensors(self, n: int) -> None:
-        """Initializes all per-node state tensors to default values.
-
-        Args:
-            n: Number of nodes.
-
-        """
-
         dev = self.device
 
         self.pred_labels = torch.zeros(n, dtype=torch.int64, device=dev)
@@ -180,30 +170,18 @@ class Subgraph:
         self.status = torch.full((n,), c.STANDARD, dtype=torch.int8, device=dev)
         self.relevant = torch.full((n,), c.IRRELEVANT, dtype=torch.int8, device=dev)
 
-        # Ordered node indices (filled during training)
         self.idx_nodes = []
-
-        # Adjacency (set by KNNSubgraph or during plateau expansion)
         self.adjacency = None
 
     def _build(
         self,
         X: torch.Tensor,
-        Y: Optional[torch.Tensor],
-        I: Optional[torch.Tensor],
+        Y: torch.Tensor | None,
+        I: torch.Tensor | None,
     ) -> None:
-        """Builds the subgraph from feature/label/index data.
-
-        Args:
-            X: Features of shape (N, D).
-            Y: Labels of shape (N,). Defaults to zeros if None.
-            I: Original indices of shape (N,). Defaults to 0..N-1 if None.
-
-        """
-
         self.features = self._to_tensor(X, dtype=torch.float32)
         if self.features.ndim != 2:
-            raise e.SizeError("Features must have shape (n_samples, n_features)")
+            raise e.SizeError("`X` must have shape (n_samples, n_features).")
 
         n = self.features.shape[0]
 
@@ -212,34 +190,44 @@ class Subgraph:
         else:
             self.labels = torch.zeros(n, dtype=torch.int64, device=self.device)
         if self.labels.ndim != 1 or len(self.labels) != n:
-            raise e.SizeError("Labels must contain one entry per sample")
+            raise e.SizeError("`Y` must contain one label per sample.")
 
         self.indices = self._to_indices(I, n)
 
-        self._n_features = self.features.shape[1] if self.features.dim() > 1 else 0
+        self._n_features = self.features.shape[1]
 
         self._init_state_tensors(n)
 
     @property
     def n_nodes(self) -> int:
-        """Number of nodes in the subgraph."""
+        """Return the number of samples in the graph.
+
+        Returns:
+            Number of feature rows.
+
+        """
 
         return self.features.shape[0]
 
     @property
     def n_features(self) -> int:
-        """Dimensionality of the feature space."""
+        """Return the dimensionality of each sample.
+
+        Returns:
+            Number of feature columns recorded when the graph was built.
+
+        """
 
         return self._n_features
 
-    def to(self, device) -> "Subgraph":
-        """Moves all tensors to the specified device.
+    def to(self, device: str | torch.device) -> Self:
+        """Move all owned tensor references and device metadata in place.
 
         Args:
             device: Target torch device or string.
 
         Returns:
-            Self, for chaining.
+            This graph for chaining.
 
         """
 
@@ -266,28 +254,33 @@ class Subgraph:
         return self
 
     def destroy_arcs(self) -> None:
-        """Destroys all adjacency arcs in the subgraph."""
+        """Clear adjacency and plateau counts without changing sample data.
+
+        """  # fmt: skip
 
         self.n_plateaus.zero_()
         self.adjacency = None
 
     def mark_nodes(self, i: int) -> None:
-        """Marks a node and its entire predecessor chain as relevant.
+        """Mark a node and its predecessor chain as relevant.
 
         Args:
             i: Starting node index.
+
+        Raises:
+            e.ValueError: The starting node is outside the graph.
 
         """
 
         self._mark_predecessors([i])
 
-    def _mark_predecessors(self, indices: List[int]) -> None:
+    def _mark_predecessors(self, indices: list[int]) -> None:
         if not indices:
             return
         if any(not 0 <= i < self.n_nodes for i in indices):
-            raise e.ValueError("Node index is outside the subgraph")
+            raise e.ValueError("`indices` must refer to nodes within the subgraph.")
 
-        # Traverse on the CPU in one batch, avoiding a device sync per predecessor.
+        # Traverse in one CPU batch to avoid a device synchronization per predecessor
         preds = self.preds.tolist()
         relevant = self.relevant.tolist()
         marked = []
@@ -296,11 +289,14 @@ class Subgraph:
                 relevant[i] = c.RELEVANT
                 marked.append(i)
                 i = preds[i]
+
         if marked:
             self.relevant[marked] = c.RELEVANT
 
     def reset(self) -> None:
-        """Resets predecessors, relevance flags, and arcs."""
+        """Reset predecessors, relevance flags, and arcs while retaining sample data.
+
+        """  # fmt: skip
 
         self.preds.fill_(c.NIL)
         self.relevant.fill_(c.IRRELEVANT)

@@ -1,9 +1,12 @@
+# Copyright (c) 2026 Gustavo de Rosa.
+# Licensed under the Apache License, Version 2.0.
+
 import sys
 
 from opforch.utils import constants
 
 
-def test_constants():
+def test_constants_match_algorithm_sentinels_and_limits():
     assert constants.EPSILON == 1e-20
 
     assert constants.FLOAT_MAX == sys.float_info.max

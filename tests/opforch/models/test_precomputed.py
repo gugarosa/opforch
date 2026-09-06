@@ -1,13 +1,17 @@
+# Copyright (c) 2026 Gustavo de Rosa.
+# Licensed under the Apache License, Version 2.0.
+
+from math import log
+
 import pytest
 import torch
 
 import opforch.utils.exception as e
-from opforch.models import (
-    KNNSupervisedOPF,
-    SemiSupervisedOPF,
-    SupervisedOPF,
-    UnsupervisedOPF,
-)
+from opforch.models.knn_supervised import KNNSupervisedOPF
+from opforch.models.semi_supervised import SemiSupervisedOPF
+from opforch.models.supervised import SupervisedOPF
+from opforch.models.unsupervised import UnsupervisedOPF
+from opforch.subgraphs.knn import KNNSubgraph
 
 
 @pytest.fixture
@@ -35,9 +39,7 @@ def test_precomputed_distances_follow_sample_indices(indexed_data, model_class):
 
     for model in (direct, stored):
         if model_class is KNNSupervisedOPF:
-            model.fit(
-                X[train], Y[train], X[validation], Y[validation], train, validation
-            )
+            model.fit(X[train], Y[train], X[validation], Y[validation], train, validation)
         elif model_class is SemiSupervisedOPF:
             model.fit(X[train], Y[train], X[unlabeled], train, I_unlabeled=unlabeled)
             fitted_indices = torch.cat((train, unlabeled))
@@ -54,11 +56,42 @@ def test_precomputed_distances_follow_sample_indices(indexed_data, model_class):
     else:
         assert actual == [1, 0]
     torch.testing.assert_close(stored.subgraph.costs, direct.subgraph.costs)
-    torch.testing.assert_close(
-        stored.get_distances(), distances[fitted_indices[:, None], fitted_indices]
-    )
+    torch.testing.assert_close(stored.get_distances(), distances[fitted_indices[:, None], fitted_indices])
     empty = stored.predict(X[:0], [])
     assert empty == (([], []) if model_class is UnsupervisedOPF else [])
+
+
+@pytest.mark.parametrize("model_class", [KNNSupervisedOPF, UnsupervisedOPF])
+def test_precomputed_knn_prediction_selects_known_density_conquerors(model_class):
+    features = torch.arange(3.0).reshape(-1, 1)
+    model = model_class(device="cpu")
+    graph = KNNSubgraph(features, torch.tensor([11, 22, 33]), device="cpu")
+    graph.best_k = 2
+    graph.constant = 1.0
+    graph.min_density = 0.0
+    graph.max_density = 1.0
+    graph.costs.copy_(torch.tensor([300.0, 700.0, 900.0]))
+    graph.pred_labels.copy_(graph.labels)
+    graph.cluster_labels.copy_(torch.tensor([0, 1, 2]))
+    graph.n_clusters = 3
+    graph.trained = True
+    model.subgraph = graph
+    model.pre_computed_distance = True
+    model.pre_distances = torch.zeros(6, 6)
+    model.pre_distances[:3, 3:] = torch.tensor(
+        [[log(2), log(4), log(16)], [log(4), log(8), log(8)], [log(16), log(16), log(4)]]
+    )
+    model.pre_distances[3:, :3] = model.pre_distances[:3, 3:].T
+
+    actual = model.predict(features, torch.tensor([3, 4, 5]))
+
+    # Query densities are 375.625, 188.3125, and 188.3125 for the two nearest neighbours
+    # The first winner is farther away; density-capped ties choose the nearest node in the other queries
+    expected_labels = [22, 11, 33]
+    if model_class is UnsupervisedOPF:
+        assert actual == (expected_labels, [1, 0, 2])
+    else:
+        assert actual == expected_labels
 
 
 @pytest.mark.parametrize(
@@ -81,7 +114,7 @@ def test_precomputed_prediction_validates_indices(indexed_data, indices, error):
 
 
 @pytest.mark.parametrize("method", ["learn", "prune"])
-def test_precomputed_learning_and_pruning(indexed_data, method):
+def test_precomputed_learning_and_pruning_preserve_index_alignment(indexed_data, method):
     X, Y, _, path = indexed_data
     train = torch.tensor([3, 0, 1, 2])
     validation = torch.tensor([7, 6])
@@ -101,7 +134,7 @@ def test_precomputed_learning_and_pruning(indexed_data, method):
     torch.testing.assert_close(model.subgraph.features, X[model.subgraph.indices])
 
 
-def test_semi_supervised_precomputed_default_indices(indexed_data):
+def test_semi_supervised_precomputed_defaults_to_consecutive_indices(indexed_data):
     X, Y, _, path = indexed_data
     model = SemiSupervisedOPF(pre_computed_distance=path, device="cpu")
 
@@ -114,9 +147,7 @@ def test_learning_moves_indices_with_swapped_samples(indexed_data, monkeypatch):
     X, Y, _, path = indexed_data
     train = torch.tensor([0, 2, 1, 3])
     validation = torch.tensor([6, 7])
-    model = SupervisedOPF(
-        distance="euclidean", pre_computed_distance=path, device="cpu"
-    )
+    model = SupervisedOPF(distance="euclidean", pre_computed_distance=path, device="cpu")
     fit = model.fit
     observed = []
 

@@ -1,80 +1,87 @@
+# Copyright (c) 2026 Gustavo de Rosa.
+# Licensed under the Apache License, Version 2.0.
+
 import pytest
 import torch
 
-from opforch.models import SemiSupervisedOPF, supervised
-from opforch.stream import loader, parser, splitter
+import opforch.utils.exception as e
+from opforch.models import supervised
+from opforch.models.semi_supervised import SemiSupervisedOPF
+from opforch.stream import splitter
 from opforch.utils import constants
 
-csv = loader.load_csv("data/boat.csv")
-X, Y = parser.parse_loader(csv)
 
-
-def test_supervised_opf_fit():
+@pytest.mark.parametrize("precomputed", [False, True])
+def test_supervised_opf_fit_trains_graph(boat_data, precomputed):
+    X, Y = boat_data
     opf = supervised.SupervisedOPF(device="cpu")
+    if precomputed:
+        opf.pre_computed_distance = True
+        opf.pre_distances = torch.ones((100, 100), dtype=torch.float64)
 
     opf.fit(X, Y)
 
     assert opf.subgraph.trained is True
 
-    opf.pre_computed_distance = True
-    try:
-        opf.pre_distances = torch.ones((99, 99), dtype=torch.float64)
-        opf.fit(X, Y)
-    except:
-        opf.pre_distances = torch.ones((100, 100), dtype=torch.float64)
-        opf.fit(X, Y)
 
-    assert opf.subgraph.trained is True
-
-
-def test_supervised_opf_predict():
+def test_supervised_opf_fit_rejects_out_of_range_distance_indices(boat_data):
+    X, Y = boat_data
     opf = supervised.SupervisedOPF(device="cpu")
-
-    try:
-        _ = opf.predict(X)
-    except:
-        opf.fit(X, Y)
-        preds = opf.predict(X)
-
-    assert len(preds) == 100
-
-    try:
-        opf.fit(X, Y)
-        opf.subgraph.trained = False
-        _ = opf.predict(X)
-    except:
-        opf.fit(X, Y)
-        preds = opf.predict(X)
-
-    assert len(preds) == 100
-
     opf.pre_computed_distance = True
-    opf.pre_distances = torch.ones((100, 100), dtype=torch.float64)
+    opf.pre_distances = torch.ones((99, 99), dtype=torch.float64)
+
+    with pytest.raises(e.ValueError):
+        opf.fit(X, Y)
+
+
+@pytest.mark.parametrize("precomputed", [False, True])
+def test_supervised_opf_predict_returns_label_per_sample(boat_data, precomputed):
+    X, Y = boat_data
+    opf = supervised.SupervisedOPF(device="cpu")
+    if precomputed:
+        opf.pre_computed_distance = True
+        opf.pre_distances = torch.ones((100, 100), dtype=torch.float64)
 
     opf.fit(X, Y)
     preds = opf.predict(X)
 
     assert len(preds) == 100
+    assert set(preds) <= set(Y.tolist())
 
 
-def test_supervised_opf_learn():
+def test_supervised_opf_predict_rejects_unfitted_model():
     opf = supervised.SupervisedOPF(device="cpu")
 
-    X_train, X_val, Y_train, Y_val = splitter.split(
-        X, Y, percentage=0.1, random_state=1
-    )
+    with pytest.raises(e.BuildError):
+        opf.predict(torch.tensor([[0.0]]))
+
+
+def test_supervised_opf_predict_rejects_untrained_graph(boat_data):
+    X, Y = boat_data
+    opf = supervised.SupervisedOPF(device="cpu")
+    opf.fit(X, Y)
+    opf.subgraph.trained = False
+
+    with pytest.raises(e.BuildError):
+        opf.predict(X)
+
+
+def test_supervised_opf_learn_retains_fitted_classifier(boat_data):
+    X, Y = boat_data
+    opf = supervised.SupervisedOPF(device="cpu")
+    X_train, X_val, Y_train, Y_val = splitter.split(X, Y, percentage=0.1, random_state=1)
 
     opf.learn(X_train, Y_train, X_val, Y_val, n_iterations=5)
 
     assert isinstance(opf, supervised.SupervisedOPF)
+    assert opf.subgraph.trained is True
+    assert len(opf.predict(X_val)) == len(X_val)
 
 
-def test_supervised_opf_prune():
+def test_supervised_opf_prune_retains_predictable_subset(boat_data):
+    X, Y = boat_data
     opf = supervised.SupervisedOPF(device="cpu")
-
-    X_train, X_val, Y_train, Y_val = splitter.split(
-        X, Y, percentage=0.5, random_state=1
-    )
+    X_train, X_val, Y_train, Y_val = splitter.split(X, Y, percentage=0.5, random_state=1)
 
     opf.prune(X_train, Y_train, X_val, Y_val, n_iterations=2)
     preds = opf.predict(X_val)
@@ -85,7 +92,7 @@ def test_supervised_opf_prune():
 
 @pytest.mark.parametrize("model_class", [supervised.SupervisedOPF, SemiSupervisedOPF])
 @pytest.mark.parametrize("n_samples", [1, 3])
-def test_single_class_training(model_class, n_samples):
+def test_supervised_opf_fit_supports_single_class(model_class, n_samples):
     features = torch.arange(n_samples, dtype=torch.float32).reshape(-1, 1)
     labels = torch.full((n_samples,), 7)
     opf = model_class(distance="euclidean", device="cpu")
@@ -100,7 +107,7 @@ def test_single_class_training(model_class, n_samples):
     assert (opf.subgraph.costs < constants.FLOAT_MAX).all()
 
 
-def test_prediction_marks_the_winner_and_its_predecessors():
+def test_supervised_opf_predict_marks_winner_and_predecessors():
     opf = supervised.SupervisedOPF(distance="euclidean", device="cpu")
     opf.fit(torch.tensor([[0.0], [1.0], [9.0], [10.0]]), torch.tensor([0, 0, 1, 1]))
 
@@ -112,7 +119,7 @@ def test_prediction_marks_the_winner_and_its_predecessors():
 
 
 @pytest.mark.parametrize("validation_indices", [[0], [0, 3]])
-def test_pruning_preserves_prototypes_and_predictions(validation_indices):
+def test_supervised_opf_prune_preserves_prototypes_and_predictions(validation_indices):
     features = torch.tensor([[0.0], [1.0], [9.0], [10.0]])
     labels = torch.tensor([0, 0, 1, 1])
     validation = features[validation_indices]
@@ -126,7 +133,7 @@ def test_pruning_preserves_prototypes_and_predictions(validation_indices):
     torch.testing.assert_close(features, torch.tensor([[0.0], [1.0], [9.0], [10.0]]))
 
 
-def test_learn_can_select_a_zero_accuracy_model():
+def test_supervised_opf_learn_can_select_zero_accuracy_model():
     features = torch.tensor([[0.0], [10.0]])
     labels = torch.tensor([0, 1])
     opf = supervised.SupervisedOPF(distance="euclidean", device="cpu")
@@ -137,7 +144,7 @@ def test_learn_can_select_a_zero_accuracy_model():
     assert opf.predict(features) == [0, 1]
 
 
-def test_supervised_minimax_costs_match_a_known_forest():
+def test_supervised_opf_minimax_costs_match_known_forest():
     opf = supervised.SupervisedOPF(distance="euclidean", device="cpu")
     opf.fit(torch.tensor([[0.0], [1.0], [4.0], [5.0]]), torch.tensor([0, 0, 1, 1]))
 
@@ -147,9 +154,7 @@ def test_supervised_minimax_costs_match_a_known_forest():
         constants.PROTOTYPE,
         constants.STANDARD,
     ]
-    torch.testing.assert_close(
-        opf.subgraph.costs, torch.tensor([1.0, 0.0, 0.0, 1.0]).double()
-    )
+    torch.testing.assert_close(opf.subgraph.costs, torch.tensor([1.0, 0.0, 0.0, 1.0]).double())
     assert opf.predict(torch.tensor([[-1.0], [0.5], [2.0], [3.0], [6.0]])) == [
         0,
         0,

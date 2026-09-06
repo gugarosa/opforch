@@ -1,8 +1,17 @@
-"""Supervised Optimum-Path Forest (PyTorch)."""
+# Copyright (c) 2026 Gustavo de Rosa.
+# Licensed under the Apache License, Version 2.0.
+
+"""Train supervised optimum-path forests with batched distance computation.
+
+References:
+    J. P. Papa, A. X. Falcão and C. T. N. Suzuki, Supervised Pattern Classification based on OPF (2009).
+
+"""
+
+from __future__ import annotations
 
 import copy
 import time
-from typing import List, Optional
 
 import torch
 
@@ -10,62 +19,45 @@ import opforch.math.general as g
 import opforch.math.random as r
 import opforch.utils.constants as c
 import opforch.utils.exception as e
-from opforch.core import OPF, Subgraph
-from opforch.utils import logging
+from opforch.core.opf import OPF
+from opforch.core.subgraph import Subgraph
+from opforch.utils.logging import get_logger
 
-logger = logging.get_logger(__name__)
+logger = get_logger(__name__)
 
 
 class SupervisedOPF(OPF):
-    """Supervised OPF classifier with batched distance computation.
+    """Classify samples using supervised minimax path competition.
 
-    References:
-        J. P. Papa, A. X. Falcão and C. T. N. Suzuki.
-        Supervised Pattern Classification based on Optimum-Path Forest.
-        International Journal of Imaging Systems and Technology (2009).
-
-    """
+    """  # fmt: skip
 
     def __init__(
         self,
         distance: str = "log_squared_euclidean",
-        pre_computed_distance: Optional[str] = None,
-        device: Optional[str] = None,
+        pre_computed_distance: str | None = None,
+        device: str | torch.device | None = None,
     ) -> None:
-        """Initialization method.
+        """Initialize a supervised classifier.
 
         Args:
             distance: Distance metric name.
             pre_computed_distance: Path to a pre-computed distance file.
-            device: Target device string.
+            device: Target device, or automatic CUDA/CPU selection when None.
 
         """
 
-        logger.info("Overriding class: OPF -> SupervisedOPF.")
+        logger.info("Creating supervised OPF classifier.")
 
-        super(SupervisedOPF, self).__init__(distance, pre_computed_distance, device)
-
-        logger.info("Class overrided.")
+        super().__init__(distance, pre_computed_distance, device)
 
     def _find_prototypes(self, dist_matrix: torch.Tensor) -> None:
-        """Finds prototype nodes via Prim's MST with vectorized inner updates.
-
-        Instead of computing pairwise distances inside the loop, we index
-        into the pre-computed dist_matrix. The inner O(N) scan per extraction
-        is replaced with masked tensor operations.
-
-        Args:
-            dist_matrix: Pre-computed (N, N) distance matrix.
-
-        """
-
         logger.debug("Finding prototypes ...")
 
         N = self.subgraph.n_nodes
         if N == 0:
-            raise e.SizeError("Training data must contain at least one sample")
+            raise e.SizeError("`X_train` must contain at least one sample.")
         if (self.subgraph.labels == self.subgraph.labels[0]).all():
-            # Without a class boundary, one seed still defines a complete forest.
+            # Without a class boundary, one seed still defines a complete forest
             self.subgraph.status[0] = c.PROTOTYPE
             return
 
@@ -77,13 +69,11 @@ class SupervisedOPF(OPF):
 
         prototypes = []
         for _ in range(N):
-            # Find cheapest node not in tree
             candidates = costs.clone()
             candidates[in_tree] = c.FLOAT_MAX
             p = candidates.argmin().item()
             in_tree[p] = True
 
-            # Check for class boundary → mark prototypes
             pred_idx = preds[p].item()
             if pred_idx != c.NIL:
                 if self.subgraph.labels[p] != self.subgraph.labels[pred_idx]:
@@ -94,12 +84,10 @@ class SupervisedOPF(OPF):
                         self.subgraph.status[pred_idx] = c.PROTOTYPE
                         prototypes.append(pred_idx)
 
-            # Update all non-tree nodes in one vectorized operation
             mask = ~in_tree
             new_costs = dist_matrix[p][mask]
             improved = new_costs < costs[mask]
 
-            # Use tensor indexing for batch update
             mask_indices = mask.nonzero(as_tuple=True)[0]
             improved_indices = mask_indices[improved]
 
@@ -111,21 +99,10 @@ class SupervisedOPF(OPF):
         logger.debug("Prototypes: %s.", prototypes)
 
     def _compete(self, dist_matrix: torch.Tensor) -> None:
-        """Runs optimum-path competition with vectorized inner updates.
-
-        Dijkstra-like algorithm with minimax path cost. The sequential heap
-        extraction remains, but inner work per iteration is fully vectorized.
-
-        Args:
-            dist_matrix: Pre-computed (N, N) distance matrix.
-
-        """
-
         N = self.subgraph.n_nodes
         costs = torch.full((N,), c.FLOAT_MAX, dtype=torch.float64, device=self.device)
         processed = torch.zeros(N, dtype=torch.bool, device=self.device)
 
-        # Prototypes start with cost 0
         proto_mask = self.subgraph.status == c.PROTOTYPE
         costs[proto_mask] = 0.0
         self.subgraph.preds[proto_mask] = c.NIL
@@ -134,7 +111,6 @@ class SupervisedOPF(OPF):
         idx_nodes = []
 
         for _ in range(N):
-            # Find unprocessed node with minimum cost
             candidates = costs.clone()
             candidates[processed] = c.FLOAT_MAX
             p = candidates.argmin().item()
@@ -142,34 +118,28 @@ class SupervisedOPF(OPF):
             idx_nodes.append(p)
             self.subgraph.costs[p] = costs[p]
 
-            # Update all unprocessed nodes where p could improve their cost
             mask = ~processed
             if not mask.any():
                 break
 
             mask_indices = mask.nonzero(as_tuple=True)[0]
 
-            # Only consider nodes whose current cost is worse than p's cost
             better_mask = costs[p] < costs[mask_indices]
             if not better_mask.any():
                 continue
 
             candidate_indices = mask_indices[better_mask]
 
-            # Compute minimax path costs
             arc_weights = dist_matrix[p, candidate_indices].to(dtype=torch.float64)
             path_costs = torch.maximum(costs[p].expand_as(arc_weights), arc_weights)
 
-            # Find which candidates actually improve
             improved = path_costs < costs[candidate_indices]
             update_indices = candidate_indices[improved]
 
             if update_indices.numel() > 0:
                 costs[update_indices] = path_costs[improved]
                 self.subgraph.preds[update_indices] = p
-                self.subgraph.pred_labels[update_indices] = self.subgraph.pred_labels[
-                    p
-                ].clone()
+                self.subgraph.pred_labels[update_indices] = self.subgraph.pred_labels[p].clone()
 
         self.subgraph.idx_nodes = idx_nodes
 
@@ -177,14 +147,24 @@ class SupervisedOPF(OPF):
         self,
         X_train: torch.Tensor,
         Y_train: torch.Tensor,
-        I_train: Optional[torch.Tensor] = None,
+        I_train: torch.Tensor | None = None,
     ) -> None:
-        """Fits data in the classifier.
+        """Replace the fitted graph using labeled training samples.
+
+        Class-crossing edges in a minimum spanning tree identify prototypes.
+        Minimax competition assigns every remaining node to a prototype using
+        the maximum edge weight on its path. Single-class input uses one seed.
+        Input storage can be shared with the graph and must not be mutated afterward.
 
         Args:
             X_train: Training features of shape (N, D).
             Y_train: Training labels of shape (N,).
             I_train: Training indices of shape (N,).
+
+        Raises:
+            e.SizeError: Training data are empty or sample dimensions do not align.
+            e.TypeError: Original sample indices are not integers.
+            e.ValueError: Original sample indices are outside the distance matrix.
 
         """
 
@@ -194,15 +174,10 @@ class SupervisedOPF(OPF):
 
         self.subgraph = Subgraph(X_train, Y_train, I=I_train, device=str(self.device))
 
-        # Compute full distance matrix ONCE — the main GPU-accelerated operation
         dist_matrix = self._get_distances()
 
-        # Step 1: Find prototypes via MST
         self._find_prototypes(dist_matrix)
-
-        # Step 2: Optimum-path competition
         self._compete(dist_matrix)
-
         self.subgraph.trained = True
 
         end = time.time()
@@ -212,26 +187,27 @@ class SupervisedOPF(OPF):
     def predict(
         self,
         X_val: torch.Tensor,
-        I_val: Optional[torch.Tensor] = None,
-    ) -> List[int]:
-        """Predicts new data using fully batched tensor operations.
+        I_val: torch.Tensor | None = None,
+    ) -> list[int]:
+        """Predict labels using batched minimax path costs.
 
-        Instead of looping over test samples, computes all train-test
-        distances and minimax costs in a single tensor operation.
+        Winning nodes and their predecessor paths are marked relevant for pruning.
 
         Args:
             X_val: Validation/test features of shape (M, D).
-            I_val: Validation/test indices.
+            I_val: Original matrix positions for the validation or test samples.
 
         Returns:
-            A list of predicted labels.
+            One predicted class label per input row, in input order.
+
+        Raises:
+            e.BuildError: The classifier has not been fitted.
+            e.SizeError: Precomputed distance or index dimensions are invalid.
+            e.ValueError: Original sample indices are outside the distance matrix.
 
         """
 
-        if self.subgraph is None:
-            raise e.BuildError("Subgraph has not been properly created")
-        if not self.subgraph.trained:
-            raise e.BuildError("Classifier has not been properly fitted")
+        self._check_fitted()
 
         logger.info("Predicting data ...")
 
@@ -241,17 +217,11 @@ class SupervisedOPF(OPF):
             X_val = torch.tensor(X_val, dtype=torch.float32)
         X_val = X_val.to(dtype=torch.float32, device=self.device)
 
-        # Compute all train-test distances in one batch: (N_train, M_test)
         dist_matrix = self._get_distances(X_val, I_val)
 
-        # Minimax path costs: max(train_node_cost, arc_weight)
-        train_costs = self.subgraph.costs.unsqueeze(1)  # (N, 1)
-        path_costs = torch.maximum(
-            train_costs, dist_matrix.to(dtype=torch.float64)
-        )  # (N, M)
-
-        # Best training node for each test sample (minimum minimax cost)
-        _, best_nodes = path_costs.min(dim=0)  # (M,)
+        train_costs = self.subgraph.costs.unsqueeze(1)
+        path_costs = torch.maximum(train_costs, dist_matrix.to(dtype=torch.float64))
+        _, best_nodes = path_costs.min(dim=0)
 
         predictions = self.subgraph.pred_labels[best_nodes]
         self.subgraph._mark_predecessors(best_nodes.unique().tolist())
@@ -269,13 +239,13 @@ class SupervisedOPF(OPF):
         X_val: torch.Tensor,
         Y_val: torch.Tensor,
         n_iterations: int = 10,
-        I_train: Optional[torch.Tensor] = None,
-        I_val: Optional[torch.Tensor] = None,
+        I_train: torch.Tensor | None = None,
+        I_val: torch.Tensor | None = None,
     ) -> None:
-        """Learns the best classifier over a validation set.
+        """Select a supervised classifier by exchanging misclassified samples.
 
-        Iteratively swaps misclassified validation samples with non-prototype
-        training samples to improve accuracy.
+        Training and validation arrays are cloned before exchanges. The
+        highest-scoring fitted model replaces this instance's state.
 
         Args:
             X_train: Training features.
@@ -286,19 +256,19 @@ class SupervisedOPF(OPF):
             I_train: Original training indices in a pre-computed distance matrix.
             I_val: Original validation indices in a pre-computed distance matrix.
 
+        Raises:
+            e.ValueError: The iteration count or original sample indices are invalid.
+            e.SizeError: Feature, label, or index dimensions do not align.
+
         """
 
         logger.info("Learning the best classifier ...")
 
         if not isinstance(n_iterations, int) or n_iterations < 1:
-            raise e.ValueError("`n_iterations` must be an integer >= 1")
+            raise e.ValueError(f"`n_iterations` must be an integer of at least 1, but got {n_iterations}.")
 
-        X_train = torch.as_tensor(
-            X_train, dtype=torch.float32, device=self.device
-        ).clone()
-        Y_train = torch.as_tensor(
-            Y_train, dtype=torch.int64, device=self.device
-        ).clone()
+        X_train = torch.as_tensor(X_train, dtype=torch.float32, device=self.device).clone()
+        Y_train = torch.as_tensor(Y_train, dtype=torch.int64, device=self.device).clone()
         X_val = torch.as_tensor(X_val, dtype=torch.float32, device=self.device).clone()
         Y_val = torch.as_tensor(Y_val, dtype=torch.int64, device=self.device).clone()
         I_train = (
@@ -364,17 +334,13 @@ class SupervisedOPF(OPF):
             previous_acc = acc
             t += 1
 
-            logger.info(
-                "Accuracy: %s | Delta: %s | Maximum Accuracy: %s", acc, delta, max_acc
-            )
+            logger.info("Accuracy: %s | Delta: %s | Maximum Accuracy: %s", acc, delta, max_acc)
 
             if delta < 0.0001 or t == n_iterations:
                 if best_opf is not None:
                     self.__dict__.update(best_opf.__dict__)
 
-                logger.info(
-                    "Best classifier has been learned over iteration %d.", best_t + 1
-                )
+                logger.info("Best classifier has been learned over iteration %d.", best_t + 1)
                 break
 
     def prune(
@@ -384,10 +350,14 @@ class SupervisedOPF(OPF):
         X_val: torch.Tensor,
         Y_val: torch.Tensor,
         n_iterations: int = 10,
-        I_train: Optional[torch.Tensor] = None,
-        I_val: Optional[torch.Tensor] = None,
+        I_train: torch.Tensor | None = None,
+        I_val: torch.Tensor | None = None,
     ) -> None:
-        """Prunes irrelevant nodes while retaining prototypes of each class.
+        """Remove irrelevant training samples while retaining class prototypes.
+
+        Each reduction refits the graph without modifying the supplied arrays.
+        Pruning is validation-driven and does not guarantee unchanged predictions
+        for other data.
 
         Args:
             X_train: Training features.
@@ -398,12 +368,16 @@ class SupervisedOPF(OPF):
             I_train: Original training indices in a pre-computed distance matrix.
             I_val: Original validation indices in a pre-computed distance matrix.
 
+        Raises:
+            e.ValueError: The iteration count or original sample indices are invalid.
+            e.SizeError: Feature, label, or index dimensions do not align.
+
         """
 
         logger.info("Pruning classifier ...")
 
         if not isinstance(n_iterations, int) or n_iterations < 0:
-            raise e.ValueError("`n_iterations` must be an integer >= 0")
+            raise e.ValueError(f"`n_iterations` must be a non-negative integer, but got {n_iterations}.")
 
         self.fit(X_train, Y_train, I_train)
         self.predict(X_val, I_val)
@@ -413,11 +387,10 @@ class SupervisedOPF(OPF):
         for t in range(n_iterations):
             logger.info("Running iteration %d/%d ...", t + 1, n_iterations)
 
-            relevant_mask = (self.subgraph.relevant != c.IRRELEVANT) | (
-                self.subgraph.status == c.PROTOTYPE
-            )
+            relevant_mask = (self.subgraph.relevant != c.IRRELEVANT) | (self.subgraph.status == c.PROTOTYPE)
             if relevant_mask.all():
                 break
+
             X_train = self.subgraph.features[relevant_mask]
             Y_train = self.subgraph.labels[relevant_mask]
             I_train = self.subgraph.indices[relevant_mask]

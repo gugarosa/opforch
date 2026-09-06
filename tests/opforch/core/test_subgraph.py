@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Gustavo de Rosa.
+# Licensed under the Apache License, Version 2.0.
+
 import pytest
 import torch
 
@@ -6,70 +9,72 @@ from opforch.core import subgraph
 from opforch.utils import constants
 
 
-def test_subgraph_n_nodes():
+def test_subgraph_n_nodes_defaults_to_zero():
     s = subgraph.Subgraph()
 
     assert s.n_nodes == 0
 
 
-def test_subgraph_n_features():
+def test_subgraph_n_features_defaults_to_zero():
     s = subgraph.Subgraph()
 
     assert s.n_features == 0
 
 
-def test_subgraph_trained():
+def test_subgraph_trained_defaults_to_false():
     s = subgraph.Subgraph()
 
     assert s.trained is False
 
 
-def test_subgraph_load():
-    s = subgraph.Subgraph()
+@pytest.mark.parametrize("suffix", [".csv", ".json", ".txt"])
+def test_subgraph_load_reads_supported_table_formats(data_dir, suffix):
+    s = subgraph.Subgraph(device="cpu")
 
-    try:
-        X, Y = s._load("data/boat")
-    except:
-        X, Y = s._load("data/boat.csv")
-        X, Y = s._load("data/boat.json")
-        X, Y = s._load("data/boat.txt")
+    X, Y = s._load(str(data_dir / f"boat{suffix}"))
 
     assert X.shape == (100, 2)
     assert Y.shape == (100,)
 
 
-def test_subgraph_build():
-    s = subgraph.Subgraph()
+def test_subgraph_load_rejects_unsupported_extension(tmp_path):
+    s = subgraph.Subgraph(device="cpu")
 
-    X, Y = s._load("data/boat.txt")
+    with pytest.raises(e.ArgumentError):
+        s._load(str(tmp_path / "boat"))
+
+
+def test_subgraph_build_initializes_default_indices(boat_data):
+    s = subgraph.Subgraph(device="cpu")
+    X, Y = boat_data
 
     s._build(X, Y, None)
 
     assert s.n_nodes == 100
     assert s.n_features == 2
+    torch.testing.assert_close(s.indices, torch.arange(100))
 
 
-def test_subgraph_build_with_index():
-    s = subgraph.Subgraph()
-
-    X, Y = s._load("data/boat.txt")
-
+def test_subgraph_build_preserves_supplied_indices(boat_data):
+    s = subgraph.Subgraph(device="cpu")
+    X, Y = boat_data
     I = Y
 
     s._build(X, Y, I)
 
     assert s.n_nodes == 100
     assert s.n_features == 2
+    torch.testing.assert_close(s.indices, I)
 
 
-def test_subgraph_from_file():
-    s = subgraph.Subgraph(from_file="data/boat.txt")
+def test_subgraph_from_file_initializes_dimensions(data_dir):
+    s = subgraph.Subgraph(from_file=str(data_dir / "boat.txt"), device="cpu")
 
     assert s.n_nodes == 100
     assert s.n_features == 2
 
 
-def test_subgraph_from_tensors():
+def test_subgraph_from_tensors_initializes_dimensions():
     X = torch.randn(10, 3)
     Y = torch.zeros(10, dtype=torch.int64)
 
@@ -79,47 +84,54 @@ def test_subgraph_from_tensors():
     assert s.n_features == 3
 
 
-def test_subgraph_destroy_arcs():
-    s = subgraph.Subgraph(from_file="data/boat.txt")
+def test_subgraph_destroy_arcs_clears_adjacency_and_plateaus(boat_data):
+    s = subgraph.Subgraph(*boat_data, device="cpu")
+    s.adjacency = torch.zeros(100, 1, dtype=torch.int64)
+    s.n_plateaus.fill_(1)
 
     s.destroy_arcs()
 
     assert s.adjacency is None
+    assert not s.n_plateaus.any()
 
 
-def test_subgraph_mark_nodes():
-    s = subgraph.Subgraph(from_file="data/boat.txt")
+def test_subgraph_mark_nodes_marks_relevance(boat_data):
+    s = subgraph.Subgraph(*boat_data, device="cpu")
 
     s.mark_nodes(0)
 
     assert s.relevant[0].item() == constants.RELEVANT
 
 
-def test_subgraph_reset():
-    s = subgraph.Subgraph(from_file="data/boat.txt")
+def test_subgraph_reset_clears_predecessors_and_relevance(boat_data):
+    s = subgraph.Subgraph(*boat_data, device="cpu")
+    s.preds.fill_(0)
+    s.relevant.fill_(constants.RELEVANT)
 
     s.reset()
 
-    assert s.preds[0].item() == constants.NIL
-    assert s.relevant[0].item() == constants.IRRELEVANT
+    assert (s.preds == constants.NIL).all()
+    assert (s.relevant == constants.IRRELEVANT).all()
 
 
-def test_subgraph_to():
-    s = subgraph.Subgraph(from_file="data/boat.txt")
+def test_subgraph_to_keeps_device_metadata_coherent(boat_data):
+    s = subgraph.Subgraph(*boat_data, device="cpu")
 
-    s.to("cpu")
+    result = s.to("cpu")
 
+    assert result is s
     assert s.device == torch.device("cpu")
+    assert s.features.device == s.device
 
 
-def test_empty_subgraph_can_change_device():
+def test_subgraph_to_preserves_empty_index_tensor():
     s = subgraph.Subgraph(device="cpu").to("cpu")
 
     assert s.indices.shape == (0,)
     assert s.indices.dtype == torch.int64
 
 
-def test_mark_nodes_follows_the_complete_predecessor_chain():
+def test_subgraph_mark_nodes_follows_complete_predecessor_chain():
     s = subgraph.Subgraph(torch.zeros(4, 1), device="cpu")
     s.preds = torch.tensor([constants.NIL, 0, 1, 2])
 
@@ -127,6 +139,11 @@ def test_mark_nodes_follows_the_complete_predecessor_chain():
     s.mark_nodes(3)
 
     assert s.relevant.tolist() == [constants.RELEVANT] * 4
+
+
+def test_subgraph_mark_nodes_rejects_missing_node():
+    s = subgraph.Subgraph(torch.zeros(4, 1), device="cpu")
+
     with pytest.raises(e.ValueError):
         s.mark_nodes(constants.NIL)
 
