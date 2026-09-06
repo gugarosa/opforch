@@ -8,4 +8,4 @@ using PyTorch tensors as the universal data representation.
 
 """
 
-__version__ = "2.1.1"
+__version__ = "3.0.0"
