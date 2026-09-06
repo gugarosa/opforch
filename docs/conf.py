@@ -1,16 +1,27 @@
+# Copyright (c) 2026 Gustavo de Rosa.
+# Licensed under the Apache License, Version 2.0.
+
+"""Configure the generated OPForch API documentation.
+
+"""
+
 import re
 import sys
 from pathlib import Path
 
 root = Path(__file__).parents[1]
 sys.path.insert(0, str(root))
-release = re.search(
+version_match = re.search(
     r'__version__ = "([^"]+)"',
     (root / "opforch" / "__init__.py").read_text(encoding="utf-8"),
-).group(1)
+)
+if version_match is None:
+    raise ValueError("`__version__` must be defined in the package initializer.")
+
+release = version_match.group(1)
 
 project = "opforch"
-copyright = "2024, Gustavo de Rosa"
+copyright = "2026, Gustavo de Rosa"
 author = "Gustavo de Rosa"
 version = release
 

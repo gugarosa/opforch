@@ -1,31 +1,38 @@
-"""Constants definitions for OPForch."""
+# Copyright (c) 2026 Gustavo de Rosa.
+# Licensed under the Apache License, Version 2.0.
+
+"""Define numerical guards and graph-state sentinels.
+
+Attributes:
+    EPSILON: Small positive guard against division by zero and logarithms of zero.
+    FLOAT_MAX: Maximum Python float used to initialize unreached path costs.
+    WHITE: Node color for nodes not yet inserted into a heap.
+    GRAY: Node color for nodes currently in a heap.
+    BLACK: Node color for nodes already removed from a heap.
+    NIL: Missing predecessor sentinel, distinct from every valid node index.
+    STANDARD: Status of a node that is not a prototype.
+    PROTOTYPE: Status of a node selected as a prototype.
+    IRRELEVANT: Relevance flag for an unselected node.
+    RELEVANT: Relevance flag for a selected node.
+    MAX_ARC_WEIGHT: Scaling factor for logarithmic distance metrics.
+    MAX_DENSITY: Upper bound for normalized node density.
+
+"""
 
 import sys
 
-# Small value to prevent division by zero and log(0)
 EPSILON = 1e-20
-
-# Maximum float value for cost initialization
 FLOAT_MAX = sys.float_info.max
 
-# Heap node colors
 WHITE = 0
 GRAY = 1
 BLACK = 2
-
-# Predecessor sentinel
 NIL = -1
 
-# Node status flags
 STANDARD = 0
 PROTOTYPE = 1
-
-# Node relevance flags
 IRRELEVANT = 0
 RELEVANT = 1
 
-# Scaling factor for log-based distance metrics
 MAX_ARC_WEIGHT = 100000
-
-# Upper bound for normalized density
 MAX_DENSITY = 1000

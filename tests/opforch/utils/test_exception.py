@@ -1,55 +1,33 @@
+# Copyright (c) 2026 Gustavo de Rosa.
+# Licensed under the Apache License, Version 2.0.
+
+import pytest
+
 from opforch.utils import exception
 
 
-def test_error():
-    new_exception = exception.Error("Error", "error")
+def test_error_preserves_custom_exception_class_and_message():
+    message = "`value` is invalid."
+    error = exception.Error("Error", message)
 
-    try:
-        raise new_exception
-    except exception.Error:
-        pass
+    with pytest.raises(exception.Error) as caught:
+        raise error
 
-
-def test_argument_error():
-    new_exception = exception.ArgumentError("error")
-
-    try:
-        raise new_exception
-    except exception.ArgumentError:
-        pass
+    assert caught.value is error
+    assert str(error) == message
 
 
-def test_build_error():
-    new_exception = exception.BuildError("error")
+@pytest.mark.parametrize(
+    "error_class",
+    [exception.ArgumentError, exception.BuildError, exception.SizeError, exception.TypeError, exception.ValueError],
+)
+def test_exception_subclasses_preserve_base_class_identity_and_message(error_class):
+    message = "`value` is invalid."
+    error = error_class(message)
 
-    try:
-        raise new_exception
-    except exception.BuildError:
-        pass
+    with pytest.raises(error_class) as caught:
+        raise error
 
-
-def test_size_error():
-    new_exception = exception.SizeError("error")
-
-    try:
-        raise new_exception
-    except exception.SizeError:
-        pass
-
-
-def test_type_error():
-    new_exception = exception.TypeError("error")
-
-    try:
-        raise new_exception
-    except exception.TypeError:
-        pass
-
-
-def test_value_error():
-    new_exception = exception.ValueError("error")
-
-    try:
-        raise new_exception
-    except exception.ValueError:
-        pass
+    assert caught.value is error
+    assert isinstance(error, exception.Error)
+    assert str(error) == message

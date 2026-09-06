@@ -11,7 +11,7 @@ training, prediction, persistence, distance, streaming, and conversion APIs.
 
 ## Installation
 
-OPForch requires Python 3.8 or newer and PyTorch 2.0 or newer.
+OPForch requires Python 3.12 or newer and PyTorch 2.0 or newer.
 
 ```bash
 pip install opforch
@@ -27,17 +27,21 @@ uv sync --locked
 
 ## Quick start
 
+This example works with an installed package and does not require repository data files.
+
 ```python
+import torch
+
 from opforch.models import SupervisedOPF
-from opforch.stream import loader, parser, splitter
 
-data = loader.load_txt("data/boat.txt")
-X, Y = parser.parse_loader(data)
-X_train, X_test, Y_train, Y_test = splitter.split(X, Y)
+X = torch.tensor([[0.0, 0.0], [0.1, 0.2], [1.0, 1.0], [1.1, 1.2]])
+Y = torch.tensor([0, 0, 1, 1])
+queries = torch.tensor([[0.05, 0.1], [1.05, 1.1]])
 
-model = SupervisedOPF(distance="log_squared_euclidean")
-model.fit(X_train, Y_train)
-predictions = model.predict(X_test)
+model = SupervisedOPF(distance="euclidean", device="cpu")
+model.fit(X, Y)
+predictions = model.predict(queries)
+print(predictions)
 ```
 
 Select a CUDA device through the existing `device` argument:
@@ -61,10 +65,25 @@ converters, train/test split helpers, tensor-backed subgraphs, and the public
 `DeviceManager` API.
 
 Only load model checkpoints from trusted sources: whole-model `load()` uses
-Python object serialization.
+Python object serialization. `save()` does not relocate the live model;
+`load()` restores state onto the receiving model's requested device.
+
+`SupervisedOPF.learn()` and `prune()` are supervised-only utilities.
+Semi-supervised training uses `fit(X_train, Y_train, X_unlabeled)`; the inherited
+supervised utilities are not supported semi-supervised training APIs.
 
 See [`examples/applications`](examples/applications) for complete classifier
 workflows.
+
+## Architecture
+
+Classifiers own training and prediction workflows. `Subgraph` owns aligned
+sample and per-node tensor state, while `KNNSubgraph` adds neighbour arcs and
+density operations. Distance functions remain plain callables in the mathematical
+registry. Streaming and conversion code own file formats and sample partitioning.
+
+This separation keeps algorithm-specific decisions in the classifiers without
+duplicating the graph's state layout or adding framework-specific model layers.
 
 ## Pre-computed distances
 
@@ -74,6 +93,7 @@ so training and prediction select the correct rows and columns:
 
 ```python
 from opforch.math.general import pre_compute_distance
+from opforch.stream import splitter
 
 pre_compute_distance(X, "distances.pt", distance="euclidean")
 X_train, X_test, Y_train, Y_test, I_train, I_test = splitter.split_with_index(X, Y)
@@ -102,6 +122,10 @@ provided, one index per sample. Supervised and semi-supervised training
 support a single labeled class. A k-NN training graph requires
 `1 <= k < n_samples`, excluding self-neighbours.
 
+Training tensors or NumPy arrays can share storage with a fitted graph when no
+conversion is needed. Do not mutate those inputs after fitting. Learning clones
+its input partitions before exchanging samples.
+
 Supervised prediction marks its winning nodes and their predecessor paths
 as relevant. Pruning keeps these paths and class prototypes; it is not a
 guarantee of unchanged accuracy on other data.
@@ -118,6 +142,9 @@ through `get_distances(normalize=True)` likewise returns zeros for a
 constant distance matrix.
 
 ## Development
+
+Follow [CONVENTIONS.md](CONVENTIONS.md) for code style, Google-style docstrings,
+error messages, and the standards used for reviews.
 
 ```bash
 uv run pytest

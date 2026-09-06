@@ -1,11 +1,15 @@
-"""Tensor-backed Heap for the Optimum-Path Forest.
+# Copyright (c) 2026 Gustavo de Rosa.
+# Licensed under the Apache License, Version 2.0.
+
+"""Provide the tensor-backed binary heap used during OPF competition.
 
 A binary heap (priority queue) supporting min and max policies.
 Internal state is stored as tensors for consistency with the
 rest of OPForch, though heap operations remain sequential.
+
 """
 
-from typing import Optional
+from __future__ import annotations
 
 import torch
 
@@ -14,72 +18,110 @@ from opforch.utils.device import DeviceManager
 
 
 class Heap:
-    """A binary heap with tensor-backed storage."""
+    """Maintain a binary heap with tensor-backed state.
+
+    """  # fmt: skip
 
     def __init__(
         self,
         size: int = 1,
         policy: str = "min",
-        device: Optional[str] = None,
+        device: str | torch.device | None = None,
     ) -> None:
-        """Initialization method.
+        """Initialize an empty heap with a fixed capacity.
 
         Args:
             size: Maximum size of the heap.
-            policy: Heap's policy ('min' or 'max').
-            device: Target device string.
+            policy: Priority policy, either min or max.
+            device: Target device, or automatic CUDA/CPU selection when None.
+
+        Raises:
+            ValueError: The capacity or priority policy is invalid.
 
         """
 
         if size < 1:
-            raise ValueError("`size` should be > 0")
+            raise ValueError(f"`size` must be greater than 0, but got {size}.")
         if policy not in ("min", "max"):
-            raise ValueError("`policy` should be 'min' or 'max'")
+            raise ValueError(f"`policy` must be min or max, but got {policy!r}.")
 
         self.size = size
         self.policy = policy
         self.device = DeviceManager.resolve(device)
 
-        self.cost = torch.full(
-            (size,), c.FLOAT_MAX, dtype=torch.float64, device=self.device
-        )
+        self.cost = torch.full((size,), c.FLOAT_MAX, dtype=torch.float64, device=self.device)
         self.color = torch.full((size,), c.WHITE, dtype=torch.int8, device=self.device)
         self.p = torch.full((size,), -1, dtype=torch.int64, device=self.device)
         self.pos = torch.full((size,), -1, dtype=torch.int64, device=self.device)
         self.last = -1
 
     def is_full(self) -> bool:
-        """Checks if the heap is full."""
+        """Return whether the heap has reached its capacity.
+
+        Returns:
+            Whether another node would exceed the capacity.
+
+        """
 
         return self.last == (self.size - 1)
 
     def is_empty(self) -> bool:
-        """Checks if the heap is empty."""
+        """Return whether the heap has no queued nodes.
+
+        Returns:
+            Whether the heap is empty.
+
+        """
 
         return self.last == -1
 
     def dad(self, i: int) -> int:
-        """Returns the position of the node's parent."""
+        """Return a heap position's parent position.
+
+        Args:
+            i: Position in the heap array.
+
+        Returns:
+            Parent position, or -1 for the root.
+
+        """
 
         return (i - 1) // 2
 
     def left_son(self, i: int) -> int:
-        """Returns the position of the node's left child."""
+        """Return a heap position's left-child position.
+
+        Args:
+            i: Position in the heap array.
+
+        Returns:
+            Left-child position without checking the current heap size.
+
+        """
 
         return 2 * i + 1
 
     def right_son(self, i: int) -> int:
-        """Returns the position of the node's right child."""
+        """Return a heap position's right-child position.
+
+        Args:
+            i: Position in the heap array.
+
+        Returns:
+            Right-child position without checking the current heap size.
+
+        """
 
         return 2 * i + 2
 
-    def _higher_priority(self, left: int, right: int) -> bool:
+    def _higher_priority(self, left: int | torch.Tensor, right: int | torch.Tensor) -> bool:
         if self.policy == "min":
-            return self.cost[left] < self.cost[right]
-        return self.cost[left] > self.cost[right]
+            return bool(self.cost[left] < self.cost[right])
+
+        return bool(self.cost[left] > self.cost[right])
 
     def go_up(self, i: int) -> None:
-        """Sifts a node up to maintain heap property.
+        """Sift a node upward to restore the priority ordering.
 
         Args:
             i: Position to sift up from.
@@ -96,7 +138,7 @@ class Heap:
             j = self.dad(i)
 
     def go_down(self, i: int) -> None:
-        """Sifts a node down to maintain heap property.
+        """Sift a node downward to restore the priority ordering.
 
         Args:
             i: Position to sift down from.
@@ -119,7 +161,7 @@ class Heap:
             self.go_down(j)
 
     def insert(self, p: int) -> bool:
-        """Inserts a new node into the heap.
+        """Insert an unqueued node into the heap.
 
         Args:
             p: Node index to insert.
@@ -135,12 +177,13 @@ class Heap:
             self.color[p] = c.GRAY
             self.pos[p] = self.last
             self.go_up(self.last)
+
             return True
 
         return False
 
     def remove(self) -> int:
-        """Removes and returns the root node from the heap.
+        """Remove the highest-priority node from the heap.
 
         Returns:
             The removed node index, or -1 if heap is empty.
@@ -166,7 +209,10 @@ class Heap:
         return -1
 
     def update(self, p: int, cost: float) -> None:
-        """Updates a node's cost and adjusts its position.
+        """Update a node's cost and promote or insert it when eligible.
+
+        A queued node's new cost is expected to improve its priority. Removed
+        nodes receive the new cost but are not reinserted.
 
         Args:
             p: Node index.
